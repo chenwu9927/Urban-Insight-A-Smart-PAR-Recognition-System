@@ -1,0 +1,43 @@
+# UrbanInsight 忽略文件
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.so
+.eggs/
+*.egg-info/
+*.egg
+
+# 虚拟环境
+venv/
+.venv/
+ENV/
+
+# 数据库
+*.db
+*.sqlite3
+
+# 上传的文件
+uploads/
+thumbnails/
+
+# Node.js
+node_modules/
+dist/
+.vite/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log

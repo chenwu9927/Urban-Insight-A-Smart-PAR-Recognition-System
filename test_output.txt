@@ -1,0 +1,215 @@
+﻿python : Traceback (most recent call
+ last):
+所在位置 行:1 字符: 1
++ python test_analyze.py 2>&1 | Out-
+File -FilePath test_output.txt -Enc 
+...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSp 
+   ecified: (Traceback (most recen  
+  t call last)::String) [], Remot   
+ eException
+    + FullyQualifiedErrorId : Nativ 
+   eCommandError
+ 
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\engine\base.py"
+, line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\engine\default.
+py", line 952, in do_execute
+    cursor.execute(statement, parame
+ters)
+sqlite3.OperationalError: table anal
+ysis_records has no column named med
+ia_file_id
+
+The above exception was the direct c
+ause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\lueying\Code\UrbanI
+nsight\test_analyze.py", line 37, in
+ <module>
+    db.commit()
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\orm\session.py"
+, line 2030, in commit
+    trans.commit(_to_root=True)
+  File "<string>", line 2, in commit
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\orm\state_chang
+es.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\orm\session.py"
+, line 1311, in commit
+    self._prepare_impl()
+  File "<string>", line 2, in _prepa
+re_impl
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\orm\state_chang
+es.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\orm\session.py"
+, line 1286, in _prepare_impl
+    self.session.flush()
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\orm\session.py"
+, line 4331, in flush
+    self._flush(objects)
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\orm\session.py"
+, line 4467, in _flush
+    transaction.rollback(_capture_ex
+ception=True)
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\util\langhelper
+s.py", line 224, in __exit__
+    raise exc_value.with_traceback(e
+xc_tb)
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\orm\session.py"
+, line 4427, in _flush
+    flush_context.execute()
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\orm\unitofwork.
+py", line 466, in execute
+    rec.execute(self)
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\orm\unitofwork.
+py", line 642, in execute
+    util.preloaded.orm_persistence.s
+ave_obj(
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\orm\persistence
+.py", line 93, in save_obj
+    _emit_insert_statements(
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\orm\persistence
+.py", line 1233, in _emit_insert_sta
+tements
+    result = connection.execute(
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\engine\base.py"
+, line 1419, in execute
+    return meth(
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\sql\elements.py
+", line 527, in _execute_on_connecti
+on
+    return connection._execute_claus
+eelement(
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\engine\base.py"
+, line 1641, in _execute_clauseeleme
+nt
+    ret = self._execute_context(
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\engine\base.py"
+, line 1846, in _execute_context
+    return self._exec_single_context
+(
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\engine\base.py"
+, line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\engine\base.py"
+, line 2363, in _handle_dbapi_except
+ion
+    raise sqlalchemy_exception.with_
+traceback(exc_info[2]) from e
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\engine\base.py"
+, line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\lueying\AppData\Loc
+al\Programs\Python\Python39\lib\site
+-packages\sqlalchemy\engine\default.
+py", line 952, in do_execute
+    cursor.execute(statement, parame
+ters)
+sqlalchemy.exc.OperationalError: (sq
+lite3.OperationalError) table analys
+is_records has no column named media
+_file_id
+[SQL: INSERT INTO analysis_records (
+media_file_id, filename, upload_time
+, pedestrian_count, results, is_vide
+o, duration, camera_location) VALUES
+ (?, ?, ?, ?, ?, ?, ?, ?)]
+[parameters: (1, '0dee5b3002d75f1330
+a9509adf82ac19.mp4', '2025-12-28 04:
+33:03.575861', 14, '[{"pedestrian_id
+": "aafffcd6-7741-45a3-8835-d6fa4a52
+81c2", "timestamp": 0.0, "bbox": {"x
+": 0, "y": 0, "width": 536, "height"
+: 955}, "attributes": {"g ... (5722 
+characters truncated) ... 2350873947
+14, "has_bag": true, "has_hat": fals
+e, "has_glasses": false, "orientatio
+n": "Back", "upper_type": "LongSleev
+e", "lower_type": "Trousers"}}]', 1,
+ 21, 'Camera 01')]
+(Background on this error at: https:
+//sqlalche.me/e/20/e3q8)
+File: 0dee5b3002d75f1330a9509adf82ac19.mp4, Type: video, Path: uploads/0dee5b3002d75f1330a9509adf82ac19.mp4
+Using device: cpu
+YOLOv8 loaded.
+Attribute model loaded.
+Recognizer loaded, starting analysis...
+Results: 14 pedestrians found
+First pedestrian: {
+  "pedestrian_id": "aafffcd6-7741-45a3-8835-d6fa4a5281c2",
+  "timestamp": 0.0,
+  "bbox": {
+    "x": 0,
+    "y": 0,
+    "width": 536,
+    "height": 955
+  },
+  "attributes": {
+    "gender": "Female",
+    "age_group": "Adult",
+    "upper_color": "Black",
+    "lower_color": "Black",
+    "has_backpack": false,
+    "confidence": 0.8976895213127136,
+    "has_bag": false,
+    "has_hat": false,
+    "has_glasses": true,
+    "orientation": "Front",
+    "upper_type": "LongSleeve",
+    "lower_type": "Skirt"
+  }
+}
+JSON serialization successful, length: 6020
+Error: (sqlite3.OperationalError) table analysis_records has no column named media_file_id
+[SQL: INSERT INTO analysis_records (media_file_id, filename, upload_time, pedestrian_count, results, is_video, duration, camera_location) VALUES (?, ?, ?, ?, ?, ?, ?, ?)]
+[parameters: (1, '0dee5b3002d75f1330a9509adf82ac19.mp4', '2025-12-28 04:33:03.575861', 14, '[{"pedestrian_id": "aafffcd6-7741-45a3-8835-d6fa4a5281c2", "timestamp": 0.0, "bbox": {"x": 0, "y": 0, "width": 536, "height": 955}, "attributes": {"g ... (5722 characters truncated) ... 235087394714, "has_bag": true, "has_hat": false, "has_glasses": false, "orientation": "Back", "upper_type": "LongSleeve", "lower_type": "Trousers"}}]', 1, 21, 'Camera 01')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
