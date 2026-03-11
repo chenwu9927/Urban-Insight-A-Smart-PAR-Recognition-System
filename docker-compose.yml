@@ -1,0 +1,93 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: deployment/frontend.Dockerfile
+    depends_on:
+      - auth-service
+      - media-service
+      - analysis-service
+      - search-service
+      - insight-service
+    ports:
+      - "80:80"
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: deployment/backend.Dockerfile
+    command: uvicorn microservices.auth_service.app:app --host 0.0.0.0 --port 8000
+    environment: &backend-env
+      DATABASE_URL: postgresql+psycopg://urban_insight:urban_insight@postgres:5432/urban_insight
+      UPLOAD_DIR: /data/uploads
+      THUMBNAIL_DIR: /data/thumbnails
+      ALLOWED_ORIGINS: http://localhost,http://127.0.0.1
+    depends_on:
+      - postgres
+    volumes:
+      - uploads-data:/data/uploads
+      - thumbnails-data:/data/thumbnails
+
+  media-service:
+    build:
+      context: .
+      dockerfile: deployment/backend.Dockerfile
+    command: uvicorn microservices.media_service.app:app --host 0.0.0.0 --port 8000
+    environment: *backend-env
+    depends_on:
+      - postgres
+    volumes:
+      - uploads-data:/data/uploads
+      - thumbnails-data:/data/thumbnails
+
+  analysis-service:
+    build:
+      context: .
+      dockerfile: deployment/backend.Dockerfile
+    command: uvicorn microservices.analysis_service.app:app --host 0.0.0.0 --port 8000
+    environment: *backend-env
+    depends_on:
+      - postgres
+    volumes:
+      - uploads-data:/data/uploads
+      - thumbnails-data:/data/thumbnails
+
+  search-service:
+    build:
+      context: .
+      dockerfile: deployment/backend.Dockerfile
+    command: uvicorn microservices.search_service.app:app --host 0.0.0.0 --port 8000
+    environment: *backend-env
+    depends_on:
+      - postgres
+    volumes:
+      - uploads-data:/data/uploads
+      - thumbnails-data:/data/thumbnails
+
+  insight-service:
+    build:
+      context: .
+      dockerfile: deployment/backend.Dockerfile
+    command: uvicorn microservices.insight_service.app:app --host 0.0.0.0 --port 8000
+    environment: *backend-env
+    depends_on:
+      - postgres
+    volumes:
+      - uploads-data:/data/uploads
+      - thumbnails-data:/data/thumbnails
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: urban_insight
+      POSTGRES_USER: urban_insight
+      POSTGRES_PASSWORD: urban_insight
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:
+  uploads-data:
+  thumbnails-data:

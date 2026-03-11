@@ -1,0 +1,30 @@
+# Web Framework
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+sqlalchemy
+
+# ML Core
+torch
+torchvision
+numpy
+opencv-python
+Pillow
+scikit-learn
+
+# Object Detection
+ultralytics
+
+# Attribute Recognition
+timm
+
+# ReID (Person Re-Identification)
+torchreid
+
+# Optional: LLM Integration
+openai
+httpx
+
+# Production database
+psycopg[binary]
