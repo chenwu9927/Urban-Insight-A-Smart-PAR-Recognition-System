@@ -25,6 +25,7 @@ torchreid
 # Optional: LLM Integration
 openai
 httpx
+croniter
 
 # Production database
 psycopg[binary]

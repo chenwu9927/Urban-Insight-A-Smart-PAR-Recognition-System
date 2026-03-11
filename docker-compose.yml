@@ -4,6 +4,11 @@ services:
       context: .
       dockerfile: deployment/frontend.Dockerfile
     depends_on:
+      - agent-control-plane
+      - agent-connector-email
+      - agent-executor
+      - agent-runtime-manager
+      - agent-scheduler
       - auth-service
       - media-service
       - analysis-service
@@ -76,6 +81,92 @@ services:
       - uploads-data:/data/uploads
       - thumbnails-data:/data/thumbnails
 
+  agent-control-plane:
+    build:
+      context: .
+      dockerfile: deployment/backend.Dockerfile
+    command: uvicorn microservices.agent_control_plane.app:app --host 0.0.0.0 --port 8000
+    environment: *backend-env
+    depends_on:
+      - postgres
+
+  agent-connector-email:
+    build:
+      context: .
+      dockerfile: deployment/backend.Dockerfile
+    command: uvicorn microservices.agent_connector_email.app:app --host 0.0.0.0 --port 8000
+    environment:
+      <<: *backend-env
+      AGENT_CONTROL_PLANE_URL: http://agent-control-plane:8000
+      AGENT_EMAIL_DELIVERY_MODE: log
+      AGENT_EMAIL_OUTBOX_DIR: /data/agent-email-outbox
+      AGENT_EMAIL_FROM_ADDRESS: agent@urban-insight.local
+      AGENT_EMAIL_ENABLE_BACKGROUND: "1"
+      AGENT_EMAIL_POLL_SECONDS: 10
+    depends_on:
+      - agent-control-plane
+    volumes:
+      - agent-email-outbox-data:/data/agent-email-outbox
+
+  agent-executor:
+    build:
+      context: .
+      dockerfile: deployment/backend.Dockerfile
+    command: uvicorn microservices.agent_executor.app:app --host 0.0.0.0 --port 8000
+    environment:
+      <<: *backend-env
+      AUTH_SERVICE_URL: http://auth-service:8000
+      MEDIA_SERVICE_URL: http://media-service:8000
+      ANALYSIS_SERVICE_URL: http://analysis-service:8000
+      SEARCH_SERVICE_URL: http://search-service:8000
+      INSIGHT_SERVICE_URL: http://insight-service:8000
+      AGENT_EXECUTOR_TIMEOUT_SECONDS: 30
+    depends_on:
+      - auth-service
+      - media-service
+      - analysis-service
+      - search-service
+      - insight-service
+
+  agent-runtime-manager:
+    build:
+      context: .
+      dockerfile: deployment/backend.Dockerfile
+    command: python -m microservices.agent_runtime_manager.main
+    environment:
+      <<: *backend-env
+      AGENT_CONTROL_PLANE_URL: http://agent-control-plane:8000
+      AGENT_EXECUTOR_URL: http://agent-executor:8000
+      AUTH_SERVICE_URL: http://auth-service:8000
+      MEDIA_SERVICE_URL: http://media-service:8000
+      ANALYSIS_SERVICE_URL: http://analysis-service:8000
+      SEARCH_SERVICE_URL: http://search-service:8000
+      INSIGHT_SERVICE_URL: http://insight-service:8000
+      AGENT_RUNTIME_POLL_SECONDS: 3
+      AGENT_RUNTIME_HEARTBEAT_SECONDS: 10
+      AGENT_RUNTIME_LEASE_SECONDS: 30
+    depends_on:
+      - agent-control-plane
+      - agent-executor
+      - auth-service
+      - media-service
+      - analysis-service
+      - search-service
+      - insight-service
+
+  agent-scheduler:
+    build:
+      context: .
+      dockerfile: deployment/backend.Dockerfile
+    command: python -m microservices.agent_scheduler.main
+    environment:
+      <<: *backend-env
+      AGENT_CONTROL_PLANE_URL: http://agent-control-plane:8000
+      AGENT_SCHEDULER_POLL_SECONDS: 10
+      AGENT_SCHEDULER_DISPATCH_LIMIT: 20
+    depends_on:
+      - agent-control-plane
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -88,6 +179,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
 
 volumes:
+  agent-email-outbox-data:
   postgres-data:
   uploads-data:
   thumbnails-data:

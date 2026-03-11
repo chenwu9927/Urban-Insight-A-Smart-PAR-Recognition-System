@@ -8,6 +8,11 @@
 - `microservices/analysis_service`: async analysis tasks, history, thumbnail hosting.
 - `microservices/search_service`: structured search, natural-language search, image search.
 - `microservices/insight_service`: stats, LLM insights, system settings.
+- `microservices/agent_control_plane`: agent session/run/scheduled-task/approval control APIs.
+- `microservices/agent_connector_email`: inbound email bridge, ACK/result delivery, approval email loop.
+- `microservices/agent_executor`: internal execution service for agent tools, ready to evolve into a sandbox executor.
+- `microservices/agent_runtime_manager`: background worker for claim/lease, heartbeat, and minimal API-only execution.
+- `microservices/agent_scheduler`: scheduled-task dispatcher for 24x7 patrols and periodic jobs.
 
 ## Deployment
 
