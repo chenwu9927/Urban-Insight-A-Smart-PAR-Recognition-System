@@ -18,6 +18,7 @@ def list_deliveries(
     connector: str | None = None,
     delivery_status: str | None = None,
     related_run_id: str | None = None,
+    related_alert_id: str | None = None,
     dedup_key: str | None = None,
     target_address: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
@@ -30,6 +31,8 @@ def list_deliveries(
         query = query.filter(AgentConnectorDelivery.delivery_status == delivery_status)
     if related_run_id:
         query = query.filter(AgentConnectorDelivery.related_run_id == related_run_id)
+    if related_alert_id:
+        query = query.filter(AgentConnectorDelivery.related_alert_id == related_alert_id)
     if dedup_key:
         query = query.filter(AgentConnectorDelivery.dedup_key == dedup_key)
     if target_address:

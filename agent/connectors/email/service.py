@@ -15,6 +15,11 @@ from agent.connectors.email.config import EmailConnectorSettings
 from agent.connectors.email.control_plane_client import EmailControlPlaneClient
 
 APPROVAL_SUBJECT_RE = re.compile(r"\[APPROVAL:(?P<approval_id>[A-Za-z0-9-]+)\]", re.IGNORECASE)
+SEVERITY_RANK = {
+    "info": 0,
+    "warning": 1,
+    "critical": 2,
+}
 
 
 def utcnow() -> datetime.datetime:
@@ -38,6 +43,17 @@ def _subject_result(subject: str) -> str:
 
 def _subject_ack(subject: str) -> str:
     return f"[ACK] {subject}".strip()
+
+
+def _subject_alert(alert: dict[str, Any], *, resolved: bool) -> str:
+    prefix = "RESOLVED" if resolved else "ALERT"
+    severity = str(alert.get("severity") or "warning").upper()
+    summary = str(alert.get("summary") or "Agent alert").strip()
+    return f"[{prefix}][{severity}] {summary}".strip()
+
+
+def _severity_value(value: str | None) -> int:
+    return SEVERITY_RANK.get(str(value or "").strip().lower(), 1)
 
 
 class EmailDeliveryGateway:
@@ -200,6 +216,9 @@ class EmailConnectorService:
         created_delta, detail_delta = self._process_pending_approvals()
         created += created_delta
         details.extend(detail_delta)
+        created_delta, detail_delta = self._process_alert_notifications()
+        created += created_delta
+        details.extend(detail_delta)
         return created, details
 
     def _process_runs(self, *, status: str) -> tuple[int, list[str]]:
@@ -258,6 +277,62 @@ class EmailConnectorService:
             details.append(f"sent approval email for approval {approval['id']}")
         return deliveries, details
 
+    def _process_alert_notifications(self) -> tuple[int, list[str]]:
+        deliveries = 0
+        details: list[str] = []
+        subscriptions = self.control_plane.list_subscriptions(
+            channel="email",
+            enabled=True,
+            schedule_type="realtime",
+            limit=200,
+        )
+        if not subscriptions:
+            return deliveries, details
+
+        open_alerts = self.control_plane.list_alerts(status="open", scope_type="service_loop", limit=100)
+        resolved_alerts = self.control_plane.list_alerts(status="resolved", scope_type="service_loop", limit=100)
+
+        for alert in open_alerts:
+            for subscription in subscriptions:
+                if not self._matches_alert_subscription(alert, subscription):
+                    continue
+                dedup_key = f"alert-open:{alert['id']}:{subscription['id']}"
+                if self._delivery_exists(dedup_key):
+                    continue
+                self._send_and_record(
+                    to_address=str(subscription["target"]),
+                    subject=_subject_alert(alert, resolved=False),
+                    body=self._format_alert_body(alert, resolved=False),
+                    thread_key=str(alert["id"]),
+                    dedup_key=dedup_key,
+                    message_type="alert_open",
+                    related_alert_id=alert["id"],
+                )
+                deliveries += 1
+                details.append(f"sent open alert email for alert {alert['id']} to {subscription['target']}")
+
+        for alert in resolved_alerts:
+            for subscription in subscriptions:
+                if not self._matches_alert_subscription(alert, subscription):
+                    continue
+                open_dedup_key = f"alert-open:{alert['id']}:{subscription['id']}"
+                resolved_dedup_key = f"alert-resolved:{alert['id']}:{subscription['id']}"
+                if not self._delivery_exists(open_dedup_key) or self._delivery_exists(resolved_dedup_key):
+                    continue
+                self._send_and_record(
+                    to_address=str(subscription["target"]),
+                    subject=_subject_alert(alert, resolved=True),
+                    body=self._format_alert_body(alert, resolved=True),
+                    thread_key=str(alert["id"]),
+                    dedup_key=resolved_dedup_key,
+                    message_type="alert_resolved",
+                    related_alert_id=alert["id"],
+                )
+                deliveries += 1
+                details.append(f"sent resolved alert email for alert {alert['id']} to {subscription['target']}")
+
+        return deliveries, details
+
     def _delivery_exists(self, dedup_key: str) -> bool:
         deliveries = self.control_plane.list_deliveries(
             connector="email",
@@ -277,6 +352,7 @@ class EmailConnectorService:
         dedup_key: str,
         message_type: str,
         related_run_id: str | None = None,
+        related_alert_id: str | None = None,
     ) -> None:
         try:
             payload = self.delivery.send(
@@ -298,6 +374,7 @@ class EmailConnectorService:
                     "subject": subject,
                     "payload": payload,
                     "related_run_id": related_run_id,
+                    "related_alert_id": related_alert_id,
                     "sent_at": utcnow().isoformat(),
                 }
             )
@@ -315,10 +392,27 @@ class EmailConnectorService:
                     "subject": subject,
                     "payload": {"error": str(exc)},
                     "related_run_id": related_run_id,
+                    "related_alert_id": related_alert_id,
                     "failed_at": utcnow().isoformat(),
                 }
             )
             raise
+
+    @staticmethod
+    def _matches_alert_subscription(alert: dict[str, Any], subscription: dict[str, Any]) -> bool:
+        if str(subscription.get("channel") or "").strip().lower() != "email":
+            return False
+        if not subscription.get("enabled"):
+            return False
+        if not str(subscription.get("target") or "").strip():
+            return False
+        scope_type = str(subscription.get("scope_type") or "").strip()
+        scope_id = str(subscription.get("scope_id") or "").strip()
+        if scope_type and scope_type != str(alert.get("scope_type") or "").strip():
+            return False
+        if scope_id and scope_id != str(alert.get("scope_id") or "").strip():
+            return False
+        return _severity_value(alert.get("severity")) >= _severity_value(subscription.get("severity_floor"))
 
     @staticmethod
     def _parse_approval_id(subject: str) -> str:
@@ -346,6 +440,22 @@ class EmailConnectorService:
             f"Reason: {approval.get('reason') or 'N/A'}\n\n"
             f"Tool input:\n{tool_input}\n\n"
             f"Reply with subject [APPROVAL:{approval['id']}] and body 'approved' or 'rejected'."
+        )
+
+    @staticmethod
+    def _format_alert_body(alert: dict[str, Any], *, resolved: bool) -> str:
+        state = "resolved" if resolved else "open"
+        evidence = str(alert.get("evidence_summary") or "").strip() or "No evidence summary available."
+        scope_value = str(alert.get("scope_id") or alert.get("scope_type") or "global")
+        return (
+            f"Alert {alert['id']} is now {state}.\n\n"
+            f"Summary: {alert.get('summary') or 'N/A'}\n"
+            f"Severity: {alert.get('severity') or 'warning'}\n"
+            f"Rule: {alert.get('source_rule') or 'N/A'}\n"
+            f"Scope: {scope_value}\n"
+            f"Detected at: {alert.get('detected_at') or 'N/A'}\n"
+            f"Updated at: {alert.get('updated_at') or 'N/A'}\n\n"
+            f"Evidence:\n{evidence}"
         )
 
 

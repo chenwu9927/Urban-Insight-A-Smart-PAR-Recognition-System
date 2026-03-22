@@ -1,26 +1,14 @@
-# Agent Executor 第一版
+# Agent Executor
 
-## 1. 作用
+## 1. 当前定位
 
-`agent-executor` 是 agent 的独立执行服务。
+`executor` 是 Agent 的工具执行层。
 
-它的职责是：
+默认情况下，它通过 `agent-service` 内部的 `/execute` 路由被调用，不再要求单独部署成一个容器。
 
-- 接收 runtime manager 转发的 `claim`
-- 根据 run 内容执行内部工具动作
-- 返回 `output_payload` 和 `result_summary`
+## 2. 当前支持的动作
 
-这一步完成后，`agent-runtime-manager` 就只负责调度，不再内联具体执行逻辑。
-
-## 2. 当前实现形态
-
-当前版本是 `api_only executor`，也就是：
-
-- 不接触宿主机
-- 不执行 shell
-- 只通过 HTTP 调用现有内部业务服务
-
-已支持动作：
+### 业务动作
 
 - `stats.get`
 - `insights.get_brief`
@@ -28,58 +16,34 @@
 - `search.structured`
 - `search.nl`
 - `analysis.get_task`
+- `patrol.analysis_backlog`
+- `patrol.analysis_failures`
+- `patrol.approval_timeout`
 
-## 3. 关键文件
+### 记忆动作
 
-- `agent/executor/config.py`
-- `agent/executor/schemas.py`
-- `agent/executor/service.py`
+- `memory.get_context`
+- `memory.read_long_term`
+- `memory.write_long_term`
+- `memory.append_daily_note`
+
+巡检动作在发现问题时，会把摘要写入 workspace memory 的每日笔记。
+
+## 3. 设计原则
+
+- 只提供受控内部工具
+- 不默认开放 shell
+- 不把 executor 做成通用无限执行器
+
+## 4. 默认运行方式
+
+默认由 `agent-service` 内部调用。
+
+标准部署入口：
+
+- `agents/agent_service/app.py`
+
+内部实现位置：
+
 - `agent/executor/router.py`
-- `microservices/agent_executor/app.py`
-
-## 4. 接口
-
-### `POST /execute`
-
-入参：
-
-```json
-{
-  "claim": {
-    "run": {},
-    "trigger_message": {},
-    "session": {}
-  }
-}
-```
-
-出参：
-
-```json
-{
-  "output_payload": {},
-  "result_summary": "Fetched stats successfully",
-  "executor_mode": "api_only"
-}
-```
-
-## 5. 为什么这一步重要
-
-这一步把“调度”和“执行”真正分开了。
-
-后面如果我们要：
-
-- 上容器沙箱
-- 注入 memory
-- 接入 artifact 生成
-- 增加更复杂的工具束
-
-都可以继续沿着 `agent-executor` 扩展，而不用再把 runtime manager 改坏。
-
-## 6. 下一步建议
-
-在 `agent-executor` 落地之后，最合适的下一步是：
-
-1. 新建 `agent-connector-email`
-2. 让邮件任务进入 `session -> run`
-3. 再把 ACK / 结果回邮 / 审批回邮打通
+- `agent/executor/service.py`

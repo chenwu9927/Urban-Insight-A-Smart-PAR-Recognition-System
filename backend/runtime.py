@@ -15,6 +15,10 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 THUMBNAIL_DIR = os.getenv("THUMBNAIL_DIR", "thumbnails")
 
 
+def is_contract_export_mode() -> bool:
+    return os.getenv("URBAN_INSIGHT_APP_MODE", "").strip().lower() == "contract-export"
+
+
 def get_allowed_origins() -> list[str]:
     raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
     origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]

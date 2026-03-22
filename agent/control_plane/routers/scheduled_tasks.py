@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from agent.control_plane.schemas import (
+    AgentScheduledTaskBootstrapResponse,
     AgentScheduledTaskCreate,
     AgentScheduledTaskDispatchResponse,
     AgentScheduledTaskResponse,
@@ -20,6 +21,7 @@ from agent.control_plane.services import (
     validate_cron,
     validate_timezone,
 )
+from agent.patrols import ensure_default_patrol_tasks
 from agent.models import AgentScheduledTask
 from backend.database import get_db
 
@@ -132,3 +134,20 @@ def trigger_scheduled_task(task_id: str, db: Session = Depends(get_db)):
 def dispatch_due(limit: int = Query(default=20, ge=1, le=200), db: Session = Depends(get_db)):
     dispatched, skipped, run_ids = dispatch_due_scheduled_tasks(db, limit=limit)
     return AgentScheduledTaskDispatchResponse(dispatched=dispatched, skipped=skipped, run_ids=run_ids)
+
+
+@router.post("/agent/scheduled-tasks/bootstrap-defaults", response_model=AgentScheduledTaskBootstrapResponse)
+def bootstrap_default_patrol_tasks(
+    timezone: str = Query(default="Asia/Shanghai"),
+    owner_user_id: int | None = Query(default=None),
+    force_update: bool = Query(default=False),
+    db: Session = Depends(get_db),
+):
+    timezone_name = validate_timezone(timezone)
+    created, updated = ensure_default_patrol_tasks(
+        db,
+        timezone_name=timezone_name,
+        owner_user_id=owner_user_id,
+        force_update=force_update,
+    )
+    return AgentScheduledTaskBootstrapResponse(created=created, updated=updated)

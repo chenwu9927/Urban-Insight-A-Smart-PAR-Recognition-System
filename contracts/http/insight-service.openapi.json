@@ -1,0 +1,672 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "UrbanInsight Insight Service",
+    "version": "0.1.0",
+    "x-service-name": "insight-service"
+  },
+  "paths": {
+    "/stats": {
+      "get": {
+        "summary": "Get Stats",
+        "description": "获取客流统计数据。\n- file_id: 可选，指定文件ID过滤\n- interval: 时间间隔（分钟），支持 1, 5, 30, 60\n- date: 可选，指定日期过滤（格式 YYYY-MM-DD）",
+        "operationId": "get_stats_stats_get",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "可选：指定文件ID进行过滤",
+              "title": "File Id"
+            },
+            "description": "可选：指定文件ID进行过滤"
+          },
+          {
+            "name": "interval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "时间间隔（分钟），可选 1, 5, 30, 60",
+              "default": 60,
+              "title": "Interval"
+            },
+            "description": "时间间隔（分钟），可选 1, 5, 30, 60"
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "可选：指定日期过滤，格式YYYY-MM-DD",
+              "title": "Date"
+            },
+            "description": "可选：指定日期过滤，格式YYYY-MM-DD"
+          },
+          {
+            "name": "dedup",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "是否按 person_id 去重(1/0)",
+              "default": 1,
+              "title": "Dedup"
+            },
+            "description": "是否按 person_id 去重(1/0)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights": {
+      "get": {
+        "summary": "Get Insights",
+        "operationId": "get_insights_insights_get",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "可选：指定文件ID进行过滤",
+              "title": "File Id"
+            },
+            "description": "可选：指定文件ID进行过滤"
+          },
+          {
+            "name": "interval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "时间间隔（分钟），可选 1, 5, 30, 60",
+              "default": 60,
+              "title": "Interval"
+            },
+            "description": "时间间隔（分钟），可选 1, 5, 30, 60"
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "可选：指定日期过滤，格式YYYY-MM-DD",
+              "title": "Date"
+            },
+            "description": "可选：指定日期过滤，格式YYYY-MM-DD"
+          },
+          {
+            "name": "use_llm",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "是否使用LLM(1/0)，未配置key时自动降级",
+              "default": 1,
+              "title": "Use Llm"
+            },
+            "description": "是否使用LLM(1/0)，未配置key时自动降级"
+          },
+          {
+            "name": "dedup",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "是否按 person_id 去重(1/0)",
+              "default": 1,
+              "title": "Dedup"
+            },
+            "description": "是否按 person_id 去重(1/0)"
+          },
+          {
+            "name": "cache",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "是否使用缓存(1/0)",
+              "default": 1,
+              "title": "Cache"
+            },
+            "description": "是否使用缓存(1/0)"
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "强制刷新(1/0)，忽略缓存",
+              "default": 0,
+              "title": "Refresh"
+            },
+            "description": "强制刷新(1/0)，忽略缓存"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights/ask": {
+      "post": {
+        "summary": "Ask Insights",
+        "operationId": "ask_insights_insights_ask_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights/brief": {
+      "get": {
+        "summary": "Get Daily Brief",
+        "operationId": "get_daily_brief_insights_brief_get",
+        "parameters": [
+          {
+            "name": "interval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "时间间隔（分钟），可选 1, 5, 30, 60",
+              "default": 60,
+              "title": "Interval"
+            },
+            "description": "时间间隔（分钟），可选 1, 5, 30, 60"
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "可选：指定日期过滤，格式YYYY-MM-DD",
+              "title": "Date"
+            },
+            "description": "可选：指定日期过滤，格式YYYY-MM-DD"
+          },
+          {
+            "name": "use_llm",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "是否使用LLM(1/0)，未配置key时自动降级",
+              "default": 1,
+              "title": "Use Llm"
+            },
+            "description": "是否使用LLM(1/0)，未配置key时自动降级"
+          },
+          {
+            "name": "dedup",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "是否按 person_id 去重(1/0)",
+              "default": 1,
+              "title": "Dedup"
+            },
+            "description": "是否按 person_id 去重(1/0)"
+          },
+          {
+            "name": "cache",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "是否使用缓存(1/0)",
+              "default": 1,
+              "title": "Cache"
+            },
+            "description": "是否使用缓存(1/0)"
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "强制刷新(1/0)，忽略缓存",
+              "default": 0,
+              "title": "Refresh"
+            },
+            "description": "强制刷新(1/0)，忽略缓存"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/llm": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Get Llm Config",
+        "description": "获取 LLM 配置（API Key 脱敏）",
+        "operationId": "get_llm_config_settings_llm_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMConfigResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Save Llm Config",
+        "description": "保存 LLM 配置",
+        "operationId": "save_llm_config_settings_llm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/llm/test": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Test Llm Connection",
+        "description": "测试 LLM 连接",
+        "operationId": "test_llm_connection_settings_llm_test_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Read Root",
+        "operationId": "read_root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Healthcheck",
+        "operationId": "healthcheck_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AskRequest": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
+          "interval": {
+            "type": "integer",
+            "title": "Interval",
+            "default": 60
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "use_llm": {
+            "type": "integer",
+            "title": "Use Llm",
+            "default": 1
+          },
+          "dedup": {
+            "type": "integer",
+            "title": "Dedup",
+            "default": 1
+          },
+          "cache": {
+            "type": "integer",
+            "title": "Cache",
+            "default": 1
+          },
+          "refresh": {
+            "type": "integer",
+            "title": "Refresh",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "AskRequest"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "LLMConfigRequest": {
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "title": "LLMConfigRequest"
+      },
+      "LLMConfigResponse": {
+        "properties": {
+          "api_key_set": {
+            "type": "boolean",
+            "title": "Api Key Set"
+          },
+          "api_key_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Preview"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "api_key_set"
+        ],
+        "title": "LLMConfigResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

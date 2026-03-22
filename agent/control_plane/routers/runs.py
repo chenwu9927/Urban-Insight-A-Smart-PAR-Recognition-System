@@ -18,10 +18,27 @@ from agent.control_plane.schemas import (
     AgentSessionResponse,
 )
 from agent.control_plane.services import create_message, create_run, utcnow
-from agent.models import AgentMessage, AgentRun, AgentSession
+from agent.models import AgentMessage, AgentRun, AgentScheduledTask, AgentSession
 from backend.database import get_db
 
 router = APIRouter()
+
+
+def _update_scheduled_task_from_run(
+    db: Session,
+    *,
+    run: AgentRun,
+    status: str,
+    error_message: str | None = None,
+) -> None:
+    if not run.scheduled_task_id:
+        return
+    task = db.query(AgentScheduledTask).filter(AgentScheduledTask.id == run.scheduled_task_id).first()
+    if not task:
+        return
+    task.last_run_id = run.id
+    task.last_run_status = status
+    task.last_error = error_message
 
 
 @router.get("/agent/runs", response_model=list[AgentRunResponse])
@@ -66,6 +83,16 @@ def create_agent_run(payload: AgentRunCreate, db: Session = Depends(get_db)):
         )
         trigger_message_id = message.id
 
+    input_payload = payload.input_payload
+    if payload.prompt:
+        normalized_input_payload = dict(input_payload or {})
+        if not str(normalized_input_payload.get("action") or "").strip():
+            params = dict(normalized_input_payload.get("params") or {})
+            params.setdefault("question", payload.prompt)
+            normalized_input_payload["action"] = "agent.chat"
+            normalized_input_payload["params"] = params
+        input_payload = normalized_input_payload
+
     run = create_run(
         db,
         session_id=session.id,
@@ -74,7 +101,7 @@ def create_agent_run(payload: AgentRunCreate, db: Session = Depends(get_db)):
         schedule_mode=payload.schedule_mode,
         permission_mode=payload.permission_mode,
         config_snapshot=payload.config_snapshot,
-        input_payload=payload.input_payload,
+        input_payload=input_payload,
         scheduled_at=payload.scheduled_at,
     )
     db.commit()
@@ -177,11 +204,27 @@ def complete_run(
     run.result_summary = payload.result_summary
     run.finished_at = utcnow()
     run.lease_expires_at = None
+    run.claimed_by = None
     run.last_error = None
 
     session = db.query(AgentSession).filter(AgentSession.id == run.session_id).first()
     if session:
         session.last_run_at = run.finished_at
+    _update_scheduled_task_from_run(db, run=run, status="completed")
+
+    summary_text = (payload.result_summary or "").strip() or "Run completed successfully."
+    create_message(
+        db,
+        session_id=run.session_id,
+        run_id=run.id,
+        role="assistant",
+        content={
+            "text": summary_text,
+            "status": run.status,
+            "output_payload": payload.output_payload,
+        },
+        text_preview=summary_text[:500],
+    )
 
     db.commit()
     db.refresh(run)
@@ -201,9 +244,27 @@ def fail_run(
         raise HTTPException(status_code=409, detail="Run is claimed by another worker")
 
     run.status = "failed"
+    run.progress = max(1, int(run.progress or 0))
     run.last_error = payload.error_message
     run.finished_at = utcnow()
     run.lease_expires_at = None
+    run.claimed_by = None
+    session = db.query(AgentSession).filter(AgentSession.id == run.session_id).first()
+    if session:
+        session.last_run_at = run.finished_at
+    _update_scheduled_task_from_run(db, run=run, status="failed", error_message=payload.error_message)
+    create_message(
+        db,
+        session_id=run.session_id,
+        run_id=run.id,
+        role="assistant",
+        content={
+            "text": payload.error_message,
+            "status": run.status,
+            "error_message": payload.error_message,
+        },
+        text_preview=payload.error_message[:500],
+    )
     db.commit()
     db.refresh(run)
     return run

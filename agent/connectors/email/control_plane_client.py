@@ -48,6 +48,16 @@ class EmailControlPlaneClient:
         response.raise_for_status()
         return response.json()
 
+    def list_alerts(self, **params: Any) -> list[dict[str, Any]]:
+        response = self.client.get(f"{self.base_url}/agent/alerts", params=params)
+        response.raise_for_status()
+        return response.json()
+
+    def list_subscriptions(self, **params: Any) -> list[dict[str, Any]]:
+        response = self.client.get(f"{self.base_url}/agent/subscriptions", params=params)
+        response.raise_for_status()
+        return response.json()
+
     def answer_approval(self, approval_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         response = self.client.post(f"{self.base_url}/agent/approvals/{approval_id}/answer", json=payload)
         response.raise_for_status()

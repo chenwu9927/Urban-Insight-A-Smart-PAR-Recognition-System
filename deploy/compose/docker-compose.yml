@@ -1,0 +1,228 @@
+x-backend-env: &backend-env
+  DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://urban_insight:urban_insight@postgres:5432/urban_insight}
+  UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
+  THUMBNAIL_DIR: ${THUMBNAIL_DIR:-/data/thumbnails}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+  LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+  LLM_CACHE_TTL_SECONDS: ${LLM_CACHE_TTL_SECONDS:-3600}
+
+x-python-healthcheck: &python-healthcheck
+  test:
+    [
+      "CMD",
+      "python",
+      "-c",
+      "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()",
+    ]
+  interval: 30s
+  timeout: 5s
+  retries: 5
+  start_period: 20s
+
+x-agent-healthcheck: &agent-healthcheck
+  test:
+    [
+      "CMD",
+      "python",
+      "-c",
+      "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/agent/runtime-status', timeout=3).read()",
+    ]
+  interval: 30s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+x-gateway-healthcheck: &gateway-healthcheck
+  test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+  interval: 30s
+  timeout: 5s
+  retries: 5
+  start_period: 10s
+
+services:
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/web-console.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      agent-service:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+      analysis-service:
+        condition: service_healthy
+      search-service:
+        condition: service_healthy
+      insight-service:
+        condition: service_healthy
+    ports:
+      - "${GATEWAY_HTTP_PORT:-80}:80"
+    healthcheck: *gateway-healthcheck
+
+  auth-service:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/python-service.Dockerfile
+    restart: unless-stopped
+    command: uvicorn services.auth_service.app:app --host 0.0.0.0 --port 8000
+    environment: &service-env
+      <<: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - uploads-data:/data/uploads
+      - thumbnails-data:/data/thumbnails
+    healthcheck: *python-healthcheck
+
+  media-service:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/python-service.Dockerfile
+    restart: unless-stopped
+    command: uvicorn services.media_service.app:app --host 0.0.0.0 --port 8000
+    environment: *service-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - uploads-data:/data/uploads
+      - thumbnails-data:/data/thumbnails
+    healthcheck: *python-healthcheck
+
+  analysis-service:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/python-service.Dockerfile
+    restart: unless-stopped
+    command: uvicorn services.analysis_service.app:app --host 0.0.0.0 --port 8000
+    environment: *service-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - uploads-data:/data/uploads
+      - thumbnails-data:/data/thumbnails
+    healthcheck: *python-healthcheck
+
+  search-service:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/python-service.Dockerfile
+    restart: unless-stopped
+    command: uvicorn services.search_service.app:app --host 0.0.0.0 --port 8000
+    environment: *service-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - uploads-data:/data/uploads
+      - thumbnails-data:/data/thumbnails
+    healthcheck: *python-healthcheck
+
+  insight-service:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/python-service.Dockerfile
+    restart: unless-stopped
+    command: uvicorn services.insight_service.app:app --host 0.0.0.0 --port 8000
+    environment: *service-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - uploads-data:/data/uploads
+      - thumbnails-data:/data/thumbnails
+    healthcheck: *python-healthcheck
+
+  agent-service:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/python-service.Dockerfile
+    restart: unless-stopped
+    command: uvicorn agents.agent_service.app:app --host 0.0.0.0 --port 8000
+    environment:
+      <<: *backend-env
+      AGENT_SERVICE_BASE_URL: ${AGENT_SERVICE_BASE_URL:-http://127.0.0.1:8000}
+      AGENT_CONTROL_PLANE_URL: ${AGENT_CONTROL_PLANE_URL:-http://127.0.0.1:8000}
+      AGENT_EXECUTOR_URL: ${AGENT_EXECUTOR_URL:-http://127.0.0.1:8000}
+      AGENT_SERVICE_ENABLE_RUNTIME: ${AGENT_SERVICE_ENABLE_RUNTIME:-1}
+      AGENT_SERVICE_ENABLE_SCHEDULER: ${AGENT_SERVICE_ENABLE_SCHEDULER:-1}
+      AGENT_SERVICE_ENABLE_EMAIL_POLLER: ${AGENT_SERVICE_ENABLE_EMAIL_POLLER:-1}
+      AGENT_SERVICE_ENABLE_SUPERVISOR: ${AGENT_SERVICE_ENABLE_SUPERVISOR:-1}
+      AGENT_SERVICE_STARTUP_DELAY_SECONDS: ${AGENT_SERVICE_STARTUP_DELAY_SECONDS:-2}
+      AGENT_SERVICE_SUPERVISOR_POLL_SECONDS: ${AGENT_SERVICE_SUPERVISOR_POLL_SECONDS:-5}
+      AGENT_SERVICE_LOOP_STALE_SECONDS: ${AGENT_SERVICE_LOOP_STALE_SECONDS:-45}
+      AGENT_EMAIL_DELIVERY_MODE: ${AGENT_EMAIL_DELIVERY_MODE:-log}
+      AGENT_EMAIL_OUTBOX_DIR: ${AGENT_EMAIL_OUTBOX_DIR:-/data/agent-email-outbox}
+      AGENT_WORKSPACE_DIR: ${AGENT_WORKSPACE_DIR:-/data/agent-workspace}
+      AGENT_EMAIL_FROM_ADDRESS: ${AGENT_EMAIL_FROM_ADDRESS:-agent@urban-insight.local}
+      AGENT_EMAIL_POLL_SECONDS: ${AGENT_EMAIL_POLL_SECONDS:-10}
+      AGENT_EMAIL_SMTP_HOST: ${AGENT_EMAIL_SMTP_HOST:-}
+      AGENT_EMAIL_SMTP_PORT: ${AGENT_EMAIL_SMTP_PORT:-587}
+      AGENT_EMAIL_SMTP_USERNAME: ${AGENT_EMAIL_SMTP_USERNAME:-}
+      AGENT_EMAIL_SMTP_PASSWORD: ${AGENT_EMAIL_SMTP_PASSWORD:-}
+      AGENT_EMAIL_SMTP_USE_TLS: ${AGENT_EMAIL_SMTP_USE_TLS:-1}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:8000}
+      MEDIA_SERVICE_URL: ${MEDIA_SERVICE_URL:-http://media-service:8000}
+      ANALYSIS_SERVICE_URL: ${ANALYSIS_SERVICE_URL:-http://analysis-service:8000}
+      SEARCH_SERVICE_URL: ${SEARCH_SERVICE_URL:-http://search-service:8000}
+      INSIGHT_SERVICE_URL: ${INSIGHT_SERVICE_URL:-http://insight-service:8000}
+      AGENT_EXECUTOR_TIMEOUT_SECONDS: ${AGENT_EXECUTOR_TIMEOUT_SECONDS:-30}
+      AGENT_RUNTIME_POLL_SECONDS: ${AGENT_RUNTIME_POLL_SECONDS:-3}
+      AGENT_RUNTIME_HEARTBEAT_SECONDS: ${AGENT_RUNTIME_HEARTBEAT_SECONDS:-10}
+      AGENT_RUNTIME_LEASE_SECONDS: ${AGENT_RUNTIME_LEASE_SECONDS:-30}
+      AGENT_SCHEDULER_POLL_SECONDS: ${AGENT_SCHEDULER_POLL_SECONDS:-10}
+      AGENT_SCHEDULER_DISPATCH_LIMIT: ${AGENT_SCHEDULER_DISPATCH_LIMIT:-20}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+      analysis-service:
+        condition: service_healthy
+      search-service:
+        condition: service_healthy
+      insight-service:
+        condition: service_healthy
+    volumes:
+      - agent-email-outbox-data:/data/agent-email-outbox
+      - agent-workspace-data:/data/agent-workspace
+    healthcheck: *agent-healthcheck
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-urban_insight}
+      POSTGRES_USER: ${POSTGRES_USER:-urban_insight}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-urban_insight}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-urban_insight} -d ${POSTGRES_DB:-urban_insight}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  agent-email-outbox-data:
+  agent-workspace-data:
+  postgres-data:
+  uploads-data:
+  thumbnails-data:

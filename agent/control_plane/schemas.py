@@ -207,6 +207,11 @@ class AgentScheduledTaskDispatchResponse(BaseModel):
     run_ids: list[str]
 
 
+class AgentScheduledTaskBootstrapResponse(BaseModel):
+    created: list[AgentScheduledTaskResponse]
+    updated: list[AgentScheduledTaskResponse]
+
+
 class AgentApprovalRequestCreate(BaseModel):
     run_id: str
     session_id: str
@@ -279,3 +284,82 @@ class AgentConnectorDeliveryResponse(BaseModel):
     updated_at: datetime.datetime
 
     model_config = {"from_attributes": True}
+
+
+class AgentAlertResponse(BaseModel):
+    id: str
+    incident_id: Optional[str] = None
+    run_id: Optional[str] = None
+    source_rule: str
+    severity: str
+    status: str
+    dedup_key: str
+    summary: str
+    evidence_summary: Optional[str] = None
+    scope_type: Optional[str] = None
+    scope_id: Optional[str] = None
+    detected_at: datetime.datetime
+    notified_at: Optional[datetime.datetime] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AgentSubscriptionCreate(BaseModel):
+    user_id: Optional[int] = None
+    channel: str = "email"
+    target: str
+    scope_type: Optional[str] = None
+    scope_id: Optional[str] = None
+    severity_floor: str = "warning"
+    schedule_type: str = "realtime"
+    enabled: bool = True
+
+
+class AgentSubscriptionUpdate(BaseModel):
+    user_id: Optional[int] = None
+    channel: Optional[str] = None
+    target: Optional[str] = None
+    scope_type: Optional[str] = None
+    scope_id: Optional[str] = None
+    severity_floor: Optional[str] = None
+    schedule_type: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class AgentSubscriptionResponse(BaseModel):
+    id: str
+    user_id: Optional[int] = None
+    channel: str
+    target: str
+    scope_type: Optional[str] = None
+    scope_id: Optional[str] = None
+    severity_floor: str
+    schedule_type: str
+    enabled: bool
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AgentToolParameterResponse(BaseModel):
+    name: str
+    value_type: str
+    required: bool
+    description: str
+    default: Any = None
+
+
+class AgentToolResponse(BaseModel):
+    action: str
+    name: str
+    category: str
+    description: str
+    target_service: str
+    risk_level: str
+    approval_mode: str
+    idempotent: bool
+    input_parameters: list[AgentToolParameterResponse]
+    output_fields: list[str]

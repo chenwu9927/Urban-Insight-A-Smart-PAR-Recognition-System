@@ -1,0 +1,545 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "UrbanInsight Search Service",
+    "version": "0.1.0",
+    "x-service-name": "search-service"
+  },
+  "paths": {
+    "/search": {
+      "post": {
+        "summary": "Search Pedestrians",
+        "operationId": "search_pedestrians_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SearchResult"
+                  },
+                  "type": "array",
+                  "title": "Response Search Pedestrians Search Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search/nl": {
+      "post": {
+        "summary": "Search Pedestrians Nl",
+        "operationId": "search_pedestrians_nl_search_nl_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NLSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search/by-image": {
+      "post": {
+        "summary": "Search Pedestrians By Image",
+        "operationId": "search_pedestrians_by_image_search_by_image_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_search_pedestrians_by_image_search_by_image_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageSearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Read Root",
+        "operationId": "read_root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Healthcheck",
+        "operationId": "healthcheck_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_search_pedestrians_by_image_search_by_image_post": {
+        "properties": {
+          "image": {
+            "type": "string",
+            "format": "binary",
+            "title": "Image"
+          },
+          "file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
+          "top_k": {
+            "type": "integer",
+            "title": "Top K",
+            "default": 50
+          },
+          "min_score": {
+            "type": "number",
+            "title": "Min Score",
+            "default": 0.2
+          }
+        },
+        "type": "object",
+        "required": [
+          "image"
+        ],
+        "title": "Body_search_pedestrians_by_image_search_by_image_post"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ImageSearchResponse": {
+        "properties": {
+          "query_attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Query Attributes"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query_attributes",
+          "results"
+        ],
+        "title": "ImageSearchResponse"
+      },
+      "NLSearchRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
+          "camera_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Camera Location"
+          },
+          "use_llm": {
+            "type": "integer",
+            "title": "Use Llm",
+            "default": 1
+          },
+          "cache": {
+            "type": "integer",
+            "title": "Cache",
+            "default": 1
+          },
+          "refresh": {
+            "type": "integer",
+            "title": "Refresh",
+            "default": 0
+          },
+          "dedup_person": {
+            "type": "integer",
+            "title": "Dedup Person",
+            "default": 1
+          },
+          "max_results": {
+            "type": "integer",
+            "title": "Max Results",
+            "default": 300
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "NLSearchRequest"
+      },
+      "SearchRequest": {
+        "properties": {
+          "file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "camera_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Camera Location"
+          },
+          "gender": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gender"
+          },
+          "age_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Group"
+          },
+          "upper_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upper Color"
+          },
+          "orientation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orientation"
+          },
+          "has_backpack": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Backpack"
+          },
+          "has_hat": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Hat"
+          },
+          "has_glasses": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Glasses"
+          },
+          "has_bag": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Bag"
+          },
+          "dedup_person": {
+            "type": "boolean",
+            "title": "Dedup Person",
+            "default": true
+          },
+          "max_results": {
+            "type": "integer",
+            "title": "Max Results",
+            "default": 300
+          }
+        },
+        "type": "object",
+        "title": "SearchRequest"
+      },
+      "SearchResult": {
+        "properties": {
+          "record_id": {
+            "type": "integer",
+            "title": "Record Id"
+          },
+          "file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "is_video": {
+            "type": "boolean",
+            "title": "Is Video",
+            "default": false
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
+          "camera_location": {
+            "type": "string",
+            "title": "Camera Location"
+          },
+          "upload_time": {
+            "type": "string",
+            "title": "Upload Time"
+          },
+          "real_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Real Time"
+          },
+          "snippet_info": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Snippet Info"
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_id",
+          "filename",
+          "camera_location",
+          "upload_time",
+          "snippet_info"
+        ],
+        "title": "SearchResult"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

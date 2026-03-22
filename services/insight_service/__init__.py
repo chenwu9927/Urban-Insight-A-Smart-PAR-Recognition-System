@@ -1,0 +1,1 @@
+"""Insight service entrypoint package."""

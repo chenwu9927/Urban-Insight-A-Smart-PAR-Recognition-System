@@ -1,0 +1,7 @@
+services:
+  gateway:
+    ports:
+      - "${GATEWAY_HTTP_PORT:-80}:80"
+
+  postgres:
+    ports: !reset []

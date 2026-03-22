@@ -115,6 +115,31 @@ def _task_response_payload(task: AnalysisTask) -> Dict[str, Any]:
     }
 
 
+def _task_detail_payload(task: AnalysisTask, db_file: Optional[MediaFile] = None) -> Dict[str, Any]:
+    payload = _task_response_payload(task)
+    if db_file is not None:
+        payload.update(
+            {
+                "filename": db_file.filename,
+                "file_type": db_file.file_type,
+                "file_status": db_file.status,
+                "upload_time": _to_iso(db_file.upload_time),
+                "file_size": db_file.file_size,
+            }
+        )
+    else:
+        payload.update(
+            {
+                "filename": None,
+                "file_type": None,
+                "file_status": None,
+                "upload_time": None,
+                "file_size": None,
+            }
+        )
+    return payload
+
+
 def _run_analysis_for_file(
     db_file: MediaFile,
     *,
@@ -297,3 +322,31 @@ def get_analysis_task(task_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Task not found")
 
     return _task_response_payload(task)
+
+
+@router.get("/analyze/tasks")
+def list_analysis_tasks(
+    status: str | None = None,
+    statuses: str | None = None,
+    file_id: int | None = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    query = db.query(AnalysisTask)
+    if status:
+        query = query.filter(AnalysisTask.status == status)
+    if statuses:
+        values = [item.strip() for item in statuses.split(",") if item.strip()]
+        if values:
+            query = query.filter(AnalysisTask.status.in_(values))
+    if file_id is not None:
+        query = query.filter(AnalysisTask.file_id == file_id)
+
+    tasks = query.order_by(AnalysisTask.created_at.desc(), AnalysisTask.id.desc()).limit(max(1, min(200, limit))).all()
+    if not tasks:
+        return []
+
+    file_ids = [task.file_id for task in tasks if task.file_id is not None]
+    files = db.query(MediaFile).filter(MediaFile.id.in_(file_ids)).all() if file_ids else []
+    files_by_id = {item.id: item for item in files}
+    return [_task_detail_payload(task, files_by_id.get(task.file_id)) for task in tasks]
