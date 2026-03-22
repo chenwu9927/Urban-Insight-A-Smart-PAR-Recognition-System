@@ -220,6 +220,7 @@ services:
       - "${MAIL_IMAPS_PORT:-993}:993"
     volumes:
       - mail-server-data:/opt/stalwart
+      - ${LETSENCRYPT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
 
   postgres:
     image: postgres:16-alpine
