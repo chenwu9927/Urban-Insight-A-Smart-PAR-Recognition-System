@@ -1,56 +1,75 @@
 import { NavLink } from 'react-router-dom';
-import { BarChart3, Bot, FolderOpen, History, LayoutDashboard, Search, Settings, Sparkles } from 'lucide-react';
+import {
+    BarChart3,
+    Bot,
+    FolderOpen,
+    History,
+    LayoutDashboard,
+    Search,
+    Settings,
+    Sparkles,
+} from 'lucide-react';
 
 const navItemClass = ({ isActive }) => `nav-item ${isActive ? 'active' : ''}`;
 
+const primaryItems = [
+    { to: '/', label: 'Home Workspace', icon: LayoutDashboard },
+    { to: '/files', label: 'Evidence Library', icon: FolderOpen },
+    { to: '/retrieval', label: 'Smart Retrieval', icon: Search },
+    { to: '/traffic', label: 'Flow Analytics', icon: BarChart3 },
+    { to: '/insights', label: 'Insight Briefs', icon: Sparkles },
+];
+
+const operationsItems = [
+    { to: '/agent', label: 'Agent Center', icon: Bot },
+    { to: '/history', label: 'Operations Log', icon: History },
+];
+
+function SidebarSection({ title, items }) {
+    return (
+        <div className="sidebar-section">
+            <div className="sidebar-section-label">{title}</div>
+            {items.map((item) => {
+                const Icon = item.icon;
+                return (
+                    <NavLink key={item.to} to={item.to} className={navItemClass}>
+                        <Icon size={20} />
+                        <span>{item.label}</span>
+                    </NavLink>
+                );
+            })}
+        </div>
+    );
+}
+
 const Sidebar = () => {
     return (
-        <div className="sidebar">
-            <div style={{ padding: '2rem 1.5rem' }}>
-                <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#2563eb', margin: 0 }}>UrbanInsight</h1>
-                <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.25rem' }}>
-                    Smart pedestrian analysis platform
-                </p>
+        <aside className="sidebar">
+            <div className="sidebar-brand">
+                <div className="sidebar-brand-mark">UI</div>
+                <div>
+                    <h1>Urban Insight</h1>
+                    <p>Client operations console</p>
+                </div>
             </div>
 
-            <nav>
-                <NavLink to="/" className={navItemClass}>
-                    <LayoutDashboard size={20} />
-                    <span>Dashboard</span>
-                </NavLink>
-                <NavLink to="/files" className={navItemClass}>
-                    <FolderOpen size={20} />
-                    <span>Files</span>
-                </NavLink>
-                <NavLink to="/retrieval" className={navItemClass}>
-                    <Search size={20} />
-                    <span>Retrieval</span>
-                </NavLink>
-                <NavLink to="/traffic" className={navItemClass}>
-                    <BarChart3 size={20} />
-                    <span>Traffic</span>
-                </NavLink>
-                <NavLink to="/insights" className={navItemClass}>
-                    <Sparkles size={20} />
-                    <span>Insights</span>
-                </NavLink>
-                <NavLink to="/agent" className={navItemClass}>
-                    <Bot size={20} />
-                    <span>Agent Center</span>
-                </NavLink>
-                <NavLink to="/history" className={navItemClass}>
-                    <History size={20} />
-                    <span>History</span>
-                </NavLink>
+            <div className="sidebar-mode-card">
+                <strong>Field-ready workspace</strong>
+                <p>Use one client view for evidence intake, retrieval, analytics, and agent operations.</p>
+            </div>
+
+            <nav className="sidebar-nav">
+                <SidebarSection title="Workspace" items={primaryItems} />
+                <SidebarSection title="Automation" items={operationsItems} />
             </nav>
 
-            <div style={{ position: 'absolute', bottom: '2rem', width: '100%' }}>
+            <div className="sidebar-footer">
                 <NavLink to="/settings" className={navItemClass}>
                     <Settings size={20} />
                     <span>Settings</span>
                 </NavLink>
             </div>
-        </div>
+        </aside>
     );
 };
 
