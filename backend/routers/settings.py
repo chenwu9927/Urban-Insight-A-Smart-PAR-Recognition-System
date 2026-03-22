@@ -74,8 +74,8 @@ async def get_llm_config(db: Session = Depends(get_db)):
     return LLMConfigResponse(
         api_key_set=bool(api_key),
         api_key_preview=api_key_preview,
-        base_url=base_url or "https://api.openai.com/v1",
-        model=model or "gpt-4o-mini"
+        base_url=base_url or "https://api.longcat.chat/openai",
+        model=model or "LongCat-Flash-Lite"
     )
 
 

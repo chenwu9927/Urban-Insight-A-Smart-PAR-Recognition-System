@@ -368,8 +368,11 @@ class AgentServiceRuntime:
         poll_seconds = self.email_service.settings.poll_seconds
         while not self._stop.is_set():
             try:
+                received, received_details = self.email_service.process_inbound_once()
                 created, details = self.email_service.process_outbound_once()
                 self._mark_loop_ok("email")
+                if received:
+                    print(f"[agent-service] inbound email processed: {received}; details={received_details}")
                 if created:
                     print(f"[agent-service] outbound email deliveries: {created}; details={details}")
             except Exception as exc:

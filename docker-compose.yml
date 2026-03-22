@@ -2,11 +2,11 @@ x-backend-env: &backend-env
   DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://urban_insight:urban_insight@postgres:5432/urban_insight}
   UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
   THUMBNAIL_DIR: ${THUMBNAIL_DIR:-/data/thumbnails}
-  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1,http://urbaninsights.site,https://urbaninsights.site}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   LLM_API_KEY: ${LLM_API_KEY:-}
-  LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
-  LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+  LLM_BASE_URL: ${LLM_BASE_URL:-https://api.longcat.chat/openai}
+  LLM_MODEL: ${LLM_MODEL:-LongCat-Flash-Lite}
   LLM_CACHE_TTL_SECONDS: ${LLM_CACHE_TTL_SECONDS:-3600}
 
 x-python-healthcheck: &python-healthcheck
@@ -162,13 +162,21 @@ services:
       AGENT_EMAIL_DELIVERY_MODE: ${AGENT_EMAIL_DELIVERY_MODE:-log}
       AGENT_EMAIL_OUTBOX_DIR: ${AGENT_EMAIL_OUTBOX_DIR:-/data/agent-email-outbox}
       AGENT_WORKSPACE_DIR: ${AGENT_WORKSPACE_DIR:-/data/agent-workspace}
-      AGENT_EMAIL_FROM_ADDRESS: ${AGENT_EMAIL_FROM_ADDRESS:-agent@urban-insight.local}
+      AGENT_EMAIL_FROM_ADDRESS: ${AGENT_EMAIL_FROM_ADDRESS:-agent@urbaninsights.site}
       AGENT_EMAIL_POLL_SECONDS: ${AGENT_EMAIL_POLL_SECONDS:-10}
       AGENT_EMAIL_SMTP_HOST: ${AGENT_EMAIL_SMTP_HOST:-}
       AGENT_EMAIL_SMTP_PORT: ${AGENT_EMAIL_SMTP_PORT:-587}
       AGENT_EMAIL_SMTP_USERNAME: ${AGENT_EMAIL_SMTP_USERNAME:-}
       AGENT_EMAIL_SMTP_PASSWORD: ${AGENT_EMAIL_SMTP_PASSWORD:-}
       AGENT_EMAIL_SMTP_USE_TLS: ${AGENT_EMAIL_SMTP_USE_TLS:-1}
+      AGENT_EMAIL_IMAP_ENABLE: ${AGENT_EMAIL_IMAP_ENABLE:-0}
+      AGENT_EMAIL_IMAP_HOST: ${AGENT_EMAIL_IMAP_HOST:-}
+      AGENT_EMAIL_IMAP_PORT: ${AGENT_EMAIL_IMAP_PORT:-993}
+      AGENT_EMAIL_IMAP_USERNAME: ${AGENT_EMAIL_IMAP_USERNAME:-}
+      AGENT_EMAIL_IMAP_PASSWORD: ${AGENT_EMAIL_IMAP_PASSWORD:-}
+      AGENT_EMAIL_IMAP_USE_SSL: ${AGENT_EMAIL_IMAP_USE_SSL:-1}
+      AGENT_EMAIL_IMAP_MAILBOX: ${AGENT_EMAIL_IMAP_MAILBOX:-INBOX}
+      AGENT_EMAIL_STATE_PATH: ${AGENT_EMAIL_STATE_PATH:-/data/agent-email-state/imap-state.json}
       AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:8000}
       MEDIA_SERVICE_URL: ${MEDIA_SERVICE_URL:-http://media-service:8000}
       ANALYSIS_SERVICE_URL: ${ANALYSIS_SERVICE_URL:-http://analysis-service:8000}
@@ -196,7 +204,22 @@ services:
     volumes:
       - agent-email-outbox-data:/data/agent-email-outbox
       - agent-workspace-data:/data/agent-workspace
+      - agent-email-state-data:/data/agent-email-state
     healthcheck: *agent-healthcheck
+
+  mail-server:
+    profiles: ["mail"]
+    image: stalwartlabs/stalwart:latest
+    restart: unless-stopped
+    ports:
+      - "${MAIL_ADMIN_HTTP_PORT:-8082}:8080"
+      - "${MAIL_SMTP_PORT:-25}:25"
+      - "${MAIL_SMTPS_PORT:-465}:465"
+      - "${MAIL_SUBMISSION_PORT:-587}:587"
+      - "${MAIL_IMAP_PORT:-143}:143"
+      - "${MAIL_IMAPS_PORT:-993}:993"
+    volumes:
+      - mail-server-data:/opt/stalwart
 
   postgres:
     image: postgres:16-alpine
@@ -222,7 +245,9 @@ services:
 
 volumes:
   agent-email-outbox-data:
+  agent-email-state-data:
   agent-workspace-data:
+  mail-server-data:
   postgres-data:
   uploads-data:
   thumbnails-data:

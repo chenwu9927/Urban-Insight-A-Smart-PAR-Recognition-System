@@ -16,6 +16,17 @@ def _post_json(url: str, *, headers: Dict[str, str], payload: Dict[str, Any], ti
     return json.loads(raw)
 
 
+def _chat_completions_url(base_url: str) -> str:
+    normalized = (base_url or "https://api.openai.com/v1").rstrip("/")
+    if normalized.endswith("/chat/completions"):
+        return normalized
+    if normalized.endswith("/v1"):
+        return f"{normalized}/chat/completions"
+    if normalized.endswith("/openai"):
+        return f"{normalized}/v1/chat/completions"
+    return f"{normalized}/chat/completions"
+
+
 def call_chat_completions_json(
     *,
     system_prompt: str,
@@ -39,7 +50,7 @@ def call_chat_completions_json(
         "response_format": {"type": "json_object"},
     }
     resp = _post_json(
-        f"{base_url}/chat/completions",
+        _chat_completions_url(base_url),
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",

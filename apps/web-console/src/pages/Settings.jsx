@@ -31,8 +31,8 @@ const Settings = ({ user, onLogout }) => {
     const [newRole, setNewRole] = useState('user');
     const [llmConfig, setLlmConfig] = useState({
         apiKey: '',
-        baseUrl: 'https://api.openai.com/v1',
-        model: 'gpt-4o-mini',
+        baseUrl: 'https://api.longcat.chat/openai',
+        model: 'LongCat-Flash-Lite',
     });
     const [llmConfigLoaded, setLlmConfigLoaded] = useState(false);
     const [llmApiKeySet, setLlmApiKeySet] = useState(false);
@@ -58,8 +58,8 @@ const Settings = ({ user, onLogout }) => {
             setLlmApiKeyPreview(response.data.api_key_preview || '');
             setLlmConfig((current) => ({
                 ...current,
-                baseUrl: response.data.base_url || 'https://api.openai.com/v1',
-                model: response.data.model || 'gpt-4o-mini',
+                baseUrl: response.data.base_url || 'https://api.longcat.chat/openai',
+                model: response.data.model || 'LongCat-Flash-Lite',
             }));
         } catch (error) {
             console.error('Failed to load LLM config', error);

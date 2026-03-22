@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import datetime
+import imaplib
 import json
 import re
 import smtplib
 import threading
 import time
 import uuid
+from email import policy
+from email.header import decode_header, make_header
 from email.message import EmailMessage
+from email.parser import BytesParser
+from email.utils import parseaddr
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +59,54 @@ def _subject_alert(alert: dict[str, Any], *, resolved: bool) -> str:
 
 def _severity_value(value: str | None) -> int:
     return SEVERITY_RANK.get(str(value or "").strip().lower(), 1)
+
+
+def _decode_subject(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        return str(make_header(decode_header(value))).strip()
+    except Exception:
+        return str(value).strip()
+
+
+def _extract_text_body(message) -> str:
+    if message.is_multipart():
+        parts: list[str] = []
+        for part in message.walk():
+            content_type = (part.get_content_type() or "").lower()
+            disposition = str(part.get_content_disposition() or "").lower()
+            if disposition == "attachment":
+                continue
+            if content_type == "text/plain":
+                try:
+                    parts.append(part.get_content().strip())
+                except Exception:
+                    continue
+        text = "\n\n".join(item for item in parts if item).strip()
+        if text:
+            return text
+
+        for part in message.walk():
+            content_type = (part.get_content_type() or "").lower()
+            disposition = str(part.get_content_disposition() or "").lower()
+            if disposition == "attachment":
+                continue
+            if content_type == "text/html":
+                try:
+                    html = part.get_content()
+                except Exception:
+                    continue
+                return re.sub(r"<[^>]+>", " ", html or "").strip()
+        return ""
+
+    try:
+        payload = message.get_content()
+    except Exception:
+        return ""
+    if (message.get_content_type() or "").lower() == "text/html":
+        return re.sub(r"<[^>]+>", " ", payload or "").strip()
+    return str(payload or "").strip()
 
 
 class EmailDeliveryGateway:
@@ -117,6 +170,7 @@ class EmailConnectorService:
         self.settings = settings or EmailConnectorSettings()
         self.control_plane = EmailControlPlaneClient(self.settings.control_plane_url)
         self.delivery = EmailDeliveryGateway(self.settings)
+        self.settings.state_path.parent.mkdir(parents=True, exist_ok=True)
 
     def close(self) -> None:
         self.control_plane.close()
@@ -220,6 +274,116 @@ class EmailConnectorService:
         created += created_delta
         details.extend(detail_delta)
         return created, details
+
+    def process_inbound_once(self) -> tuple[int, list[str]]:
+        if not self.settings.imap_enable:
+            return 0, []
+        if not self.settings.imap_host or not self.settings.imap_username:
+            return 0, ["IMAP inbound polling is enabled but not fully configured"]
+
+        state = self._read_state()
+        mailbox = self.settings.imap_mailbox
+        last_uid = int(state.get(mailbox, 0) or 0)
+        processed = 0
+        details: list[str] = []
+
+        client = None
+        try:
+            if self.settings.imap_use_ssl:
+                client = imaplib.IMAP4_SSL(self.settings.imap_host, self.settings.imap_port)
+            else:
+                client = imaplib.IMAP4(self.settings.imap_host, self.settings.imap_port)
+            client.login(self.settings.imap_username, self.settings.imap_password)
+            status, _ = client.select(mailbox)
+            if status != "OK":
+                raise RuntimeError(f"Unable to select mailbox {mailbox}")
+
+            status, data = client.uid("SEARCH", None, f"UID {last_uid + 1}:*")
+            if status != "OK":
+                raise RuntimeError("Unable to search mailbox")
+
+            highest_uid = last_uid
+            uid_list = [item.decode("utf-8") if isinstance(item, bytes) else str(item) for item in (data[0] or b"").split()]
+            for uid in uid_list:
+                status, fetched = client.uid("FETCH", uid, "(RFC822)")
+                if status != "OK":
+                    details.append(f"failed to fetch message uid={uid}")
+                    continue
+
+                raw_message = b""
+                for chunk in fetched:
+                    if isinstance(chunk, tuple) and len(chunk) >= 2:
+                        raw_message = chunk[1]
+                        break
+                if not raw_message:
+                    details.append(f"empty message uid={uid}")
+                    continue
+
+                message = BytesParser(policy=policy.default).parsebytes(raw_message)
+                from_address = parseaddr(message.get("Reply-To") or message.get("From") or "")[1].strip()
+                subject = _decode_subject(message.get("Subject"))
+                text = _extract_text_body(message)
+                connector_message_id = str(message.get("Message-ID") or f"imap:{mailbox}:{uid}").strip()
+                thread_key = str(message.get("In-Reply-To") or message.get("References") or connector_message_id).strip()
+                dedup_key = f"inbound:{connector_message_id}"
+
+                if self._delivery_exists(dedup_key, delivery_status="received"):
+                    highest_uid = max(highest_uid, int(uid))
+                    continue
+                if not from_address:
+                    details.append(f"skipped uid={uid} without sender address")
+                    highest_uid = max(highest_uid, int(uid))
+                    continue
+
+                result, mode = self.ingest_email(
+                    {
+                        "from_address": from_address,
+                        "subject": subject,
+                        "text": text,
+                        "thread_key": thread_key,
+                        "connector_message_id": connector_message_id,
+                        "metadata": {
+                            "uid": uid,
+                            "mailbox": mailbox,
+                            "to_address": parseaddr(message.get("To") or "")[1].strip(),
+                        },
+                    }
+                )
+                self.control_plane.create_delivery(
+                    {
+                        "connector": "email",
+                        "direction": "inbound",
+                        "message_type": "email_inbound",
+                        "delivery_status": "received",
+                        "dedup_key": dedup_key,
+                        "thread_key": thread_key,
+                        "source_address": from_address,
+                        "target_address": parseaddr(message.get("To") or "")[1].strip(),
+                        "subject": subject,
+                        "payload": {
+                            "mode": mode,
+                            "connector_message_id": connector_message_id,
+                            "uid": uid,
+                            "result": result,
+                        },
+                        "sent_at": utcnow().isoformat(),
+                    }
+                )
+                highest_uid = max(highest_uid, int(uid))
+                processed += 1
+                details.append(f"processed inbound email uid={uid} mode={mode}")
+
+            if highest_uid > last_uid:
+                state[mailbox] = highest_uid
+                self._write_state(state)
+        finally:
+            if client is not None:
+                try:
+                    client.logout()
+                except Exception:
+                    pass
+
+        return processed, details
 
     def _process_runs(self, *, status: str) -> tuple[int, list[str]]:
         deliveries = 0
@@ -333,14 +497,30 @@ class EmailConnectorService:
 
         return deliveries, details
 
-    def _delivery_exists(self, dedup_key: str) -> bool:
-        deliveries = self.control_plane.list_deliveries(
-            connector="email",
-            delivery_status="sent",
-            dedup_key=dedup_key,
-            limit=1,
-        )
+    def _delivery_exists(self, dedup_key: str, *, delivery_status: str | None = "sent") -> bool:
+        params: dict[str, Any] = {
+            "connector": "email",
+            "dedup_key": dedup_key,
+            "limit": 1,
+        }
+        if delivery_status:
+            params["delivery_status"] = delivery_status
+        deliveries = self.control_plane.list_deliveries(**params)
         return bool(deliveries)
+
+    def _read_state(self) -> dict[str, Any]:
+        if not self.settings.state_path.exists():
+            return {}
+        try:
+            return json.loads(self.settings.state_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _write_state(self, state: dict[str, Any]) -> None:
+        self.settings.state_path.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     def _send_and_record(
         self,
@@ -476,7 +656,10 @@ class EmailBackgroundPoller:
     def _loop(self) -> None:
         while not self._stop.wait(self.poll_seconds):
             try:
+                received, received_details = self.service.process_inbound_once()
                 created, details = self.service.process_outbound_once()
+                if received:
+                    print(f"[agent-email] processed inbound emails: {received}; details={received_details}")
                 if created:
                     print(f"[agent-email] created deliveries: {created}; details={details}")
             except Exception as exc:
