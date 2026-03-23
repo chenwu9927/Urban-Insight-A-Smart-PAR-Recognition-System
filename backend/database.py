@@ -3,6 +3,7 @@ import hashlib
 import os
 
 from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, create_engine, text
+from sqlalchemy import inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -109,6 +110,23 @@ def register_agent_models() -> None:
     import agent.models  # noqa: F401
 
 
+def _ensure_agent_runtime_columns(connection) -> None:
+    inspector = inspect(connection)
+    if "agent_runs" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("agent_runs")}
+    required_columns = {
+        "parent_run_id": "VARCHAR(36)",
+        "goal_key": "VARCHAR(255)",
+        "step_index": "INTEGER",
+    }
+    for name, sql_type in required_columns.items():
+        if name in existing_columns:
+            continue
+        connection.execute(text(f"ALTER TABLE agent_runs ADD COLUMN {name} {sql_type}"))
+
+
 def _ensure_default_admin(db_session) -> None:
     admin = db_session.query(User).filter(User.username == "admin").first()
     if admin:
@@ -136,6 +154,7 @@ def init_db():
             )
             try:
                 Base.metadata.create_all(bind=connection)
+                _ensure_agent_runtime_columns(connection)
                 locked_session = sessionmaker(
                     autocommit=False,
                     autoflush=False,
@@ -154,6 +173,8 @@ def init_db():
         return
 
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        _ensure_agent_runtime_columns(connection)
     db = SessionLocal()
     try:
         _ensure_default_admin(db)

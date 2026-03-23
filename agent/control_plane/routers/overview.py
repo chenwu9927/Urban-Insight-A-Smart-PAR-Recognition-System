@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from agent.control_plane.services import utcnow
-from agent.models import AgentApprovalRequest, AgentMessage, AgentRun, AgentScheduledTask, AgentSession
+from agent.models import AgentApprovalRequest, AgentGoal, AgentMessage, AgentRun, AgentScheduledTask, AgentSession
 from backend.database import get_db
 
 router = APIRouter()
@@ -21,6 +21,9 @@ def _serialize_run(run: AgentRun, session: AgentSession | None, trigger_message:
     return {
         "id": run.id,
         "status": run.status,
+        "parent_run_id": run.parent_run_id,
+        "goal_key": run.goal_key,
+        "step_index": run.step_index,
         "progress": run.progress,
         "schedule_mode": run.schedule_mode,
         "permission_mode": run.permission_mode,
@@ -69,6 +72,13 @@ def get_agent_overview(
             or 0
         ),
         "pending_approvals": db.query(func.count(AgentApprovalRequest.id)).filter(AgentApprovalRequest.status == "pending").scalar() or 0,
+        "active_goals": (
+            db.query(func.count(AgentGoal.id))
+            .filter(AgentGoal.status.in_(["planned", "running", "replanning", "blocked", "pending_verification", "verifying", "recovering"]))
+            .scalar()
+            or 0
+        ),
+        "blocked_goals": db.query(func.count(AgentGoal.id)).filter(AgentGoal.status == "blocked").scalar() or 0,
         "enabled_scheduled_tasks": (
             db.query(func.count(AgentScheduledTask.id)).filter(AgentScheduledTask.enabled == True).scalar() or 0  # noqa: E712
         ),
@@ -106,6 +116,7 @@ def get_agent_overview(
         .limit(session_limit)
         .all()
     )
+    recent_goals = db.query(AgentGoal).order_by(AgentGoal.updated_at.desc(), AgentGoal.created_at.desc()).limit(8).all()
 
     return {
         "generated_at": now.isoformat(),
@@ -137,5 +148,22 @@ def get_agent_overview(
                 "last_run_at": session.last_run_at.isoformat() if session.last_run_at else None,
             }
             for session in recent_sessions
+        ],
+        "recent_goals": [
+            {
+                "id": goal.id,
+                "session_id": goal.session_id,
+                "root_run_id": goal.root_run_id,
+                "latest_run_id": goal.latest_run_id,
+                "title": goal.title,
+                "summary": goal.summary,
+                "status": goal.status,
+                "step_count": goal.step_count,
+                "active_steps": goal.active_steps,
+                "completed_steps": goal.completed_steps,
+                "failed_steps": goal.failed_steps,
+                "updated_at": goal.updated_at.isoformat() if goal.updated_at else None,
+            }
+            for goal in recent_goals
         ],
     }

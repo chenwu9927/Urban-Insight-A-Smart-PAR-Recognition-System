@@ -45,6 +45,18 @@ def run(command: list[str], *, cwd: Path | None = None) -> None:
     subprocess.run(command, cwd=location, check=True)
 
 
+def capture(command: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    location = cwd or ROOT
+    print(f"[run] {' '.join(command)}")
+    return subprocess.run(
+        command,
+        cwd=location,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def check_required_paths() -> None:
     missing = [path for path in REQUIRED_DIRS if not path.exists()]
     if missing:
@@ -87,6 +99,48 @@ def validate_python_sources() -> None:
             compile(source, str(path), "exec")
 
 
+def validate_first_party_text() -> None:
+    suspicious_patterns = ("闀挎", "璁颁綇", "浠ュ悗", "榛樿", "锛歖")
+    search_roots = (
+        ROOT / "agent",
+        ROOT / "agents",
+        ROOT / "backend",
+        ROOT / "services",
+        ROOT / "docs",
+        ROOT / "apps" / "web-console" / "src",
+    )
+    allowed_suffixes = {".py", ".jsx", ".js", ".md", ".css"}
+    hits: list[str] = []
+
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*")):
+            if path.suffix.lower() not in allowed_suffixes or not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                if any(pattern in line for pattern in suspicious_patterns):
+                    hits.append(f"{path.relative_to(ROOT)}:{lineno}")
+                    if len(hits) >= 20:
+                        break
+            if len(hits) >= 20:
+                break
+        if len(hits) >= 20:
+            break
+
+    if hits:
+        formatted = ", ".join(hits)
+        raise RuntimeError(f"Suspicious mojibake-like text found in first-party sources: {formatted}")
+
+
+def validate_agent_autonomy() -> None:
+    run([sys.executable, "scripts/validate_agent_autonomy.py"])
+
+
 def validate_frontend(*, install_deps: bool) -> None:
     npm = shutil.which("npm")
     if not npm:
@@ -95,6 +149,22 @@ def validate_frontend(*, install_deps: bool) -> None:
     if install_deps:
         run([npm, "ci"], cwd=WEB_CONSOLE_DIR)
     run([npm, "run", "build"], cwd=WEB_CONSOLE_DIR)
+    validate_frontend_audit(npm)
+
+
+def validate_frontend_audit(npm: str) -> None:
+    result = capture([npm, "audit", "--json"], cwd=WEB_CONSOLE_DIR)
+    if not result.stdout.strip():
+        raise RuntimeError("npm audit did not return JSON output")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Failed to parse npm audit output: {exc}") from exc
+
+    metadata = payload.get("metadata") or {}
+    vulnerabilities = (metadata.get("vulnerabilities") or {}).get("total", 0)
+    if vulnerabilities:
+        raise RuntimeError(f"npm audit reported {vulnerabilities} vulnerabilities")
 
 
 def validate_compose() -> None:
@@ -146,6 +216,8 @@ def main() -> None:
     check_forbidden_paths()
     export_and_validate_contracts()
     validate_python_sources()
+    validate_first_party_text()
+    validate_agent_autonomy()
 
     if not args.skip_frontend:
         validate_frontend(install_deps=args.install_frontend_deps)

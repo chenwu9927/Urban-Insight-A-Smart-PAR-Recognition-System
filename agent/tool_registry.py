@@ -34,6 +34,68 @@ class AgentToolSpec:
 
 AGENT_TOOL_SPECS: tuple[AgentToolSpec, ...] = (
     AgentToolSpec(
+        action="agent.get_overview",
+        name="Agent Overview",
+        category="orchestration",
+        description="Read the current agent operations overview including active runs, recent sessions, and pending approvals.",
+        target_service="agent-service",
+        risk_level="R0",
+        approval_mode="none",
+        output_fields=("counts", "active_runs", "recent_runs", "pending_approvals", "recent_sessions"),
+    ),
+    AgentToolSpec(
+        action="agent.get_runtime_status",
+        name="Agent Runtime Status",
+        category="orchestration",
+        description="Read the current runtime loop health, heartbeat, and restart state of the always-on agent service.",
+        target_service="agent-service",
+        risk_level="R0",
+        approval_mode="none",
+        output_fields=("started_at", "loops"),
+    ),
+    AgentToolSpec(
+        action="agent.list_alerts",
+        name="Agent Alerts",
+        category="orchestration",
+        description="Read recent agent alerts to identify open incidents or degraded runtime conditions.",
+        target_service="agent-service",
+        risk_level="R0",
+        approval_mode="none",
+        input_parameters=(
+            AgentToolParameter("status", "string", False, "Optional alert status filter such as open or resolved.", "open"),
+            AgentToolParameter("severity", "string", False, "Optional severity filter such as warning or critical."),
+            AgentToolParameter("limit", "integer", False, "Maximum number of alerts to return.", 10),
+        ),
+        output_fields=("alerts",),
+    ),
+    AgentToolSpec(
+        action="agent.list_goals",
+        name="Agent Goals",
+        category="orchestration",
+        description="List recent autonomous goals, their current state, and execution progress.",
+        target_service="agent-service",
+        risk_level="R0",
+        approval_mode="none",
+        input_parameters=(
+            AgentToolParameter("status", "string", False, "Optional goal status filter such as running or blocked."),
+            AgentToolParameter("limit", "integer", False, "Maximum number of goals to return.", 10),
+        ),
+        output_fields=("goals",),
+    ),
+    AgentToolSpec(
+        action="agent.get_goal",
+        name="Agent Goal Detail",
+        category="orchestration",
+        description="Read a single autonomous goal and its lifecycle summary.",
+        target_service="agent-service",
+        risk_level="R0",
+        approval_mode="none",
+        input_parameters=(
+            AgentToolParameter("goal_id", "string", True, "Identifier of the goal to inspect."),
+        ),
+        output_fields=("goal",),
+    ),
+    AgentToolSpec(
         action="stats.get",
         name="Platform Stats",
         category="insight",
@@ -121,7 +183,7 @@ AGENT_TOOL_SPECS: tuple[AgentToolSpec, ...] = (
         input_parameters=(
             AgentToolParameter("question", "string", False, "Operator question. Falls back to the trigger prompt."),
         ),
-        output_fields=("answer", "agent_overview", "insight_answer"),
+        output_fields=("answer", "tool_events", "session_summary", "goal_summary", "planned_steps"),
     ),
     AgentToolSpec(
         action="patrol.analysis_backlog",

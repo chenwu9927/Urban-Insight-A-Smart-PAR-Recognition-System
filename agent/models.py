@@ -68,18 +68,47 @@ class AgentMessage(Base, TimestampMixin):
     thread_key = Column(String(255), nullable=True, index=True)
 
 
+class AgentGoal(Base, TimestampMixin):
+    __tablename__ = "agent_goals"
+    __table_args__ = (
+        Index("ix_agent_goals_status_updated", "status", "updated_at"),
+        Index("ix_agent_goals_session_status", "session_id", "status"),
+    )
+
+    id = Column(String(36), primary_key=True, default=uuid_str)
+    session_id = Column(String(36), nullable=False, index=True)
+    root_run_id = Column(String(36), nullable=False, index=True)
+    latest_run_id = Column(String(36), nullable=True, index=True)
+    title = Column(String(255), nullable=True)
+    summary = Column(Text, nullable=True)
+    status = Column(String(50), default="planned", nullable=False, index=True)
+    auto_replan = Column(Boolean, default=True, nullable=False)
+    step_count = Column(Integer, default=0, nullable=False)
+    active_steps = Column(Integer, default=0, nullable=False)
+    completed_steps = Column(Integer, default=0, nullable=False)
+    failed_steps = Column(Integer, default=0, nullable=False)
+    last_error = Column(Text, nullable=True)
+    last_planned_at = Column(DateTime, nullable=True, index=True)
+    last_replanned_at = Column(DateTime, nullable=True, index=True)
+    meta = Column(JSON, nullable=True)
+
+
 class AgentRun(Base, TimestampMixin):
     __tablename__ = "agent_runs"
     __table_args__ = (
         Index("ix_agent_runs_status_scheduled", "status", "scheduled_at", "created_at"),
         Index("ix_agent_runs_session_status", "session_id", "status"),
         Index("ix_agent_runs_claim", "claimed_by", "lease_expires_at"),
+        Index("ix_agent_runs_parent_goal_step", "parent_run_id", "goal_key", "step_index"),
     )
 
     id = Column(String(36), primary_key=True, default=uuid_str)
     session_id = Column(String(36), nullable=False, index=True)
     trigger_message_id = Column(String(36), nullable=True, index=True)
     scheduled_task_id = Column(String(36), nullable=True, index=True)
+    parent_run_id = Column(String(36), nullable=True, index=True)
+    goal_key = Column(String(255), nullable=True, index=True)
+    step_index = Column(Integer, nullable=True, index=True)
     created_by_user_id = Column(Integer, nullable=True, index=True)
     status = Column(String(50), default="queued", nullable=False, index=True)
     schedule_mode = Column(String(50), default="immediate", nullable=False, index=True)
@@ -307,6 +336,7 @@ class AgentDedupEvent(Base):
 AGENT_MODEL_TABLES = (
     AgentSession.__table__,
     AgentMessage.__table__,
+    AgentGoal.__table__,
     AgentRun.__table__,
     AgentScheduledTask.__table__,
     AgentApprovalRequest.__table__,

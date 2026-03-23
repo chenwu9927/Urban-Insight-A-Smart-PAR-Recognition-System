@@ -17,8 +17,8 @@ from agent.control_plane.schemas import (
     AgentRunResponse,
     AgentSessionResponse,
 )
-from agent.control_plane.services import create_message, create_run, utcnow
-from agent.models import AgentMessage, AgentRun, AgentScheduledTask, AgentSession
+from agent.control_plane.services import create_follow_up_runs, create_message, create_replan_run, create_run, sync_goal_state, utcnow
+from agent.models import AgentGoal, AgentMessage, AgentRun, AgentScheduledTask, AgentSession
 from backend.database import get_db
 
 router = APIRouter()
@@ -41,10 +41,48 @@ def _update_scheduled_task_from_run(
     task.last_error = error_message
 
 
+def _record_goal_strategy_feedback(
+    goal: AgentGoal | None,
+    *,
+    output_payload: dict[str, object] | None = None,
+    error_message: str | None = None,
+) -> None:
+    if goal is None:
+        return
+
+    meta = dict(goal.meta or {})
+    if isinstance(output_payload, dict):
+        strategic_context = output_payload.get("strategic_context")
+        if isinstance(strategic_context, dict):
+            meta["last_strategy_context"] = strategic_context
+
+        memory_writeback = output_payload.get("memory_writeback")
+        if not isinstance(memory_writeback, dict):
+            memory_writeback = {}
+        strategy_feedback_status = output_payload.get("strategy_feedback_status") or memory_writeback.get("strategy_feedback_status")
+        strategy_feedback_summary = output_payload.get("strategy_feedback_summary") or memory_writeback.get("strategy_feedback_summary")
+        if strategy_feedback_status or strategy_feedback_summary:
+            meta["last_strategy_feedback"] = {
+                "status": strategy_feedback_status or "unknown",
+                "summary": strategy_feedback_summary or "",
+                "updated_at": utcnow().isoformat(),
+            }
+
+    if error_message:
+        meta["last_strategy_feedback"] = {
+            "status": "failed",
+            "summary": error_message,
+            "updated_at": utcnow().isoformat(),
+        }
+    goal.meta = meta
+
+
 @router.get("/agent/runs", response_model=list[AgentRunResponse])
 def list_runs(
     status: str | None = None,
     session_id: str | None = None,
+    parent_run_id: str | None = None,
+    goal_key: str | None = None,
     schedule_mode: str | None = None,
     claimed_by: str | None = None,
     limit: int = Query(default=50, ge=1, le=200),
@@ -55,6 +93,10 @@ def list_runs(
         query = query.filter(AgentRun.status == status)
     if session_id:
         query = query.filter(AgentRun.session_id == session_id)
+    if parent_run_id:
+        query = query.filter(AgentRun.parent_run_id == parent_run_id)
+    if goal_key:
+        query = query.filter(AgentRun.goal_key == goal_key)
     if schedule_mode:
         query = query.filter(AgentRun.schedule_mode == schedule_mode)
     if claimed_by:
@@ -97,6 +139,9 @@ def create_agent_run(payload: AgentRunCreate, db: Session = Depends(get_db)):
         db,
         session_id=session.id,
         trigger_message_id=trigger_message_id,
+        parent_run_id=payload.parent_run_id,
+        goal_key=payload.goal_key,
+        step_index=payload.step_index,
         created_by_user_id=payload.created_by_user_id,
         schedule_mode=payload.schedule_mode,
         permission_mode=payload.permission_mode,
@@ -206,6 +251,7 @@ def complete_run(
     run.lease_expires_at = None
     run.claimed_by = None
     run.last_error = None
+    spawned_follow_up_ids: list[str] = []
 
     session = db.query(AgentSession).filter(AgentSession.id == run.session_id).first()
     if session:
@@ -225,6 +271,49 @@ def complete_run(
         },
         text_preview=summary_text[:500],
     )
+
+    existing_spawned = ((run.output_payload or {}).get("spawned_follow_up_run_ids") or []) if isinstance(run.output_payload, dict) else []
+    auto_dispatch_followups = True
+    if isinstance(run.input_payload, dict) and run.input_payload.get("auto_dispatch_followups") is False:
+        auto_dispatch_followups = False
+    planned_steps = (payload.output_payload or {}).get("planned_steps") if isinstance(payload.output_payload, dict) else None
+    if isinstance(payload.output_payload, dict) and payload.output_payload.get("auto_dispatch_followups") is False:
+        auto_dispatch_followups = False
+    goal_summary = (payload.output_payload or {}).get("goal_summary") if isinstance(payload.output_payload, dict) else None
+    auto_replan = True
+    if isinstance(run.input_payload, dict) and run.input_payload.get("auto_replan") is False:
+        auto_replan = False
+    if isinstance(payload.output_payload, dict) and payload.output_payload.get("auto_replan") is False:
+        auto_replan = False
+    if auto_dispatch_followups and not existing_spawned and isinstance(planned_steps, list) and planned_steps:
+        spawned_runs = create_follow_up_runs(
+            db,
+            parent_run=run,
+            steps=planned_steps,
+            goal_summary=goal_summary,
+            auto_replan=auto_replan,
+        )
+        spawned_follow_up_ids = [item.id for item in spawned_runs]
+        if spawned_follow_up_ids:
+            run.output_payload = dict(run.output_payload or {})
+            run.output_payload["spawned_follow_up_run_ids"] = spawned_follow_up_ids
+
+    if run.goal_key and run.schedule_mode == "verification":
+        goal = db.query(AgentGoal).filter(AgentGoal.id == run.goal_key).first()
+        if goal is not None and not planned_steps:
+            meta = dict(goal.meta or {})
+            meta["verified_at"] = utcnow().isoformat()
+            goal.meta = meta
+
+    if run.goal_key:
+        goal = db.query(AgentGoal).filter(AgentGoal.id == run.goal_key).first()
+        _record_goal_strategy_feedback(goal, output_payload=payload.output_payload)
+
+    if run.goal_key:
+        sync_goal_state(db, run.goal_key)
+    elif spawned_follow_up_ids:
+        run.goal_key = run.id
+        sync_goal_state(db, run.goal_key)
 
     db.commit()
     db.refresh(run)
@@ -249,6 +338,7 @@ def fail_run(
     run.finished_at = utcnow()
     run.lease_expires_at = None
     run.claimed_by = None
+    spawned_replan_run_id: str | None = None
     session = db.query(AgentSession).filter(AgentSession.id == run.session_id).first()
     if session:
         session.last_run_at = run.finished_at
@@ -265,6 +355,21 @@ def fail_run(
         },
         text_preview=payload.error_message[:500],
     )
+    auto_replan = True
+    if isinstance(run.input_payload, dict) and run.input_payload.get("auto_replan") is False:
+        auto_replan = False
+    if auto_replan and run.goal_key:
+        replan_run = create_replan_run(db, failed_run=run, error_message=payload.error_message)
+        if replan_run is not None:
+            spawned_replan_run_id = replan_run.id
+    if run.goal_key:
+        goal = db.query(AgentGoal).filter(AgentGoal.id == run.goal_key).first()
+        _record_goal_strategy_feedback(goal, error_message=payload.error_message)
+    if run.goal_key:
+        sync_goal_state(db, run.goal_key)
+    if spawned_replan_run_id:
+        run.output_payload = dict(run.output_payload or {})
+        run.output_payload["spawned_replan_run_id"] = spawned_replan_run_id
     db.commit()
     db.refresh(run)
     return run

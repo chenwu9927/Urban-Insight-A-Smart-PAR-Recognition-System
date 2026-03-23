@@ -8,6 +8,7 @@ from agent.control_plane.schemas import (
     AgentMessageResponse,
     AgentSessionCreate,
     AgentSessionResponse,
+    AgentSessionUpdate,
 )
 from agent.control_plane.services import create_message
 from agent.models import AgentMessage, AgentSession
@@ -62,6 +63,7 @@ def get_session(session_id: str, db: Session = Depends(get_db)):
 def list_session_messages(
     session_id: str,
     limit: int = Query(default=200, ge=1, le=500),
+    tail: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
     session = (
@@ -71,13 +73,14 @@ def list_session_messages(
     )
     if not session:
         raise HTTPException(status_code=404, detail="Agent session not found")
-    return (
+    query = (
         db.query(AgentMessage)
         .filter(AgentMessage.session_id == session_id)
-        .order_by(AgentMessage.created_at.asc())
-        .limit(limit)
-        .all()
     )
+    if tail:
+        rows = query.order_by(AgentMessage.created_at.desc()).limit(limit).all()
+        return list(reversed(rows))
+    return query.order_by(AgentMessage.created_at.asc()).limit(limit).all()
 
 
 @router.post("/agent/sessions/{session_id}/messages", response_model=AgentMessageResponse)
@@ -98,3 +101,33 @@ def create_session_message(
     db.commit()
     db.refresh(message)
     return message
+
+
+@router.patch("/agent/sessions/{session_id}", response_model=AgentSessionResponse)
+def update_session(
+    session_id: str,
+    payload: AgentSessionUpdate,
+    db: Session = Depends(get_db),
+):
+    session = (
+        db.query(AgentSession)
+        .filter(AgentSession.id == session_id, AgentSession.is_deleted == False)  # noqa: E712
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Agent session not found")
+
+    if payload.title is not None:
+        session.title = payload.title
+    if payload.status is not None:
+        session.status = payload.status
+    if payload.config_snapshot is not None:
+        session.config_snapshot = payload.config_snapshot
+    if payload.state_patch is not None:
+        session.state_patch = payload.state_patch
+    if payload.last_run_at is not None:
+        session.last_run_at = payload.last_run_at
+
+    db.commit()
+    db.refresh(session)
+    return session

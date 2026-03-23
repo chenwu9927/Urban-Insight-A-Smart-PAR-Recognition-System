@@ -12,7 +12,7 @@ os.environ.setdefault("AGENT_CONTROL_PLANE_URL", _service_base_url)
 os.environ.setdefault("AGENT_EXECUTOR_URL", _service_base_url)
 
 from agent.connectors.email.router import router as email_router, service as email_service  # noqa: E402
-from agent.control_plane.routers import alerts, approvals, deliveries, overview, runs, scheduled_tasks, sessions, subscriptions, tools  # noqa: E402
+from agent.control_plane.routers import alerts, approvals, deliveries, events, goals, overview, runs, scheduled_tasks, sessions, subscriptions, tools  # noqa: E402
 from agent.executor.router import router as executor_router, service as executor_service  # noqa: E402
 
 
@@ -23,6 +23,8 @@ app = create_service_app(
         sessions.router,
         tools.router,
         alerts.router,
+        goals.router,
+        events.router,
         subscriptions.router,
         overview.router,
         runs.router,

@@ -36,6 +36,14 @@ class AgentSessionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AgentSessionUpdate(BaseModel):
+    title: Optional[str] = None
+    status: Optional[str] = None
+    config_snapshot: Optional[dict[str, Any]] = None
+    state_patch: Optional[dict[str, Any]] = None
+    last_run_at: Optional[datetime.datetime] = None
+
+
 class AgentMessageCreate(BaseModel):
     role: str
     content: dict[str, Any]
@@ -64,6 +72,9 @@ class AgentMessageResponse(BaseModel):
 class AgentRunCreate(BaseModel):
     session_id: str
     trigger_message_id: Optional[str] = None
+    parent_run_id: Optional[str] = None
+    goal_key: Optional[str] = None
+    step_index: Optional[int] = None
     created_by_user_id: Optional[int] = None
     schedule_mode: str = "immediate"
     permission_mode: str = "default"
@@ -78,6 +89,9 @@ class AgentRunResponse(BaseModel):
     session_id: str
     trigger_message_id: Optional[str] = None
     scheduled_task_id: Optional[str] = None
+    parent_run_id: Optional[str] = None
+    goal_key: Optional[str] = None
+    step_index: Optional[int] = None
     created_by_user_id: Optional[int] = None
     status: str
     schedule_mode: str
@@ -129,6 +143,97 @@ class AgentRunCompleteRequest(BaseModel):
 class AgentRunFailRequest(BaseModel):
     worker_id: Optional[str] = None
     error_message: str
+
+
+class AgentGoalResponse(BaseModel):
+    id: str
+    session_id: str
+    root_run_id: str
+    latest_run_id: Optional[str] = None
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    status: str
+    auto_replan: bool
+    step_count: int
+    active_steps: int
+    completed_steps: int
+    failed_steps: int
+    last_error: Optional[str] = None
+    last_planned_at: Optional[datetime.datetime] = None
+    last_replanned_at: Optional[datetime.datetime] = None
+    meta: Optional[dict[str, Any]] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AgentGoalSweepResponse(BaseModel):
+    inspected: int
+    synced: int
+    replanned: int
+    verified: int
+    recovered: int
+    run_ids: list[str]
+
+
+class AgentEventIngestRequest(BaseModel):
+    event_type: str
+    summary: str
+    payload: Optional[dict[str, Any]] = None
+    scope_type: Optional[str] = None
+    scope_id: Optional[str] = None
+    session_id: Optional[str] = None
+    goal_id: Optional[str] = None
+    dedup_key: Optional[str] = None
+    ttl_seconds: int = 600
+
+
+class AgentEventIngestResponse(BaseModel):
+    accepted: bool
+    deduped: bool = False
+    session_id: Optional[str] = None
+    goal_id: Optional[str] = None
+    run_id: Optional[str] = None
+
+
+class AgentMemoryPatrolBoostResponse(BaseModel):
+    scanned: int
+    triggered: int
+    run_ids: list[str]
+    task_ids: list[str]
+
+
+class AgentRiskClusterResponse(BaseModel):
+    label: str
+    summary: str
+    severity: str
+    confidence: Optional[float] = None
+    recommended_strategy: Optional[str] = None
+    evidence: list[str] = Field(default_factory=list)
+
+
+class AgentProactiveGoalResponse(BaseModel):
+    scanned: int
+    candidates: int
+    created: int
+    deduped: int
+    rule_candidates: int = 0
+    llm_candidates: int = 0
+    llm_distillation_used: bool = False
+    llm_error: Optional[str] = None
+    distillation_summary: Optional[str] = None
+    strategy_summary: Optional[str] = None
+    strategy_directives: list[str] = Field(default_factory=list)
+    risk_clusters: list[AgentRiskClusterResponse] = Field(default_factory=list)
+    strategy_feedback_summary: Optional[str] = None
+    feedback_status_counts: dict[str, int] = Field(default_factory=dict)
+    feedback_priority_boost: int = 0
+    priority_tier: str = "normal"
+    priority_boost: int = 0
+    priority_score: float = 0.0
+    run_ids: list[str]
+    goal_ids: list[str]
 
 
 class AgentScheduledTaskCreate(BaseModel):

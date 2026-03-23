@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import datetime
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from agent.patrol_priority import MemoryDrivenPatrolPriority
 from agent.control_plane.schemas import (
+    AgentMemoryPatrolBoostResponse,
     AgentScheduledTaskBootstrapResponse,
     AgentScheduledTaskCreate,
     AgentScheduledTaskDispatchResponse,
@@ -151,3 +154,19 @@ def bootstrap_default_patrol_tasks(
         force_update=force_update,
     )
     return AgentScheduledTaskBootstrapResponse(created=created, updated=updated)
+
+
+@router.post("/agent/scheduled-tasks/boost-from-memory", response_model=AgentMemoryPatrolBoostResponse)
+def boost_patrols_from_memory(
+    lookback_days: int = Query(default=2, ge=1, le=7),
+    boost_cooldown_minutes: int = Query(default=30, ge=1, le=24 * 60),
+    db: Session = Depends(get_db),
+):
+    priority = MemoryDrivenPatrolPriority(os.getenv("AGENT_WORKSPACE_DIR", "agent_workspace"))
+    result = priority.trigger_boosts(
+        db,
+        lookback_days=lookback_days,
+        boost_cooldown_minutes=boost_cooldown_minutes,
+    )
+    db.commit()
+    return AgentMemoryPatrolBoostResponse(**result)

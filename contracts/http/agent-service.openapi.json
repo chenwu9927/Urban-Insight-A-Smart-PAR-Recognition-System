@@ -189,6 +189,53 @@
             }
           }
         }
+      },
+      "patch": {
+        "summary": "Update Session",
+        "operationId": "update_session_agent_sessions__session_id__patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSessionUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/agent/sessions/{session_id}/messages": {
@@ -215,6 +262,16 @@
               "minimum": 1,
               "default": 200,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "tail",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Tail"
             }
           }
         ],
@@ -562,6 +619,410 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentAlertResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/goals": {
+      "get": {
+        "summary": "List Goals",
+        "operationId": "list_goals_agent_goals_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "auto_replan",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auto Replan"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentGoalResponse"
+                  },
+                  "title": "Response List Goals Agent Goals Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/goals/{goal_id}": {
+      "get": {
+        "summary": "Get Goal",
+        "operationId": "get_goal_agent_goals__goal_id__get",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentGoalResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/goals/{goal_id}/runs": {
+      "get": {
+        "summary": "List Goal Runs",
+        "operationId": "list_goal_runs_agent_goals__goal_id__runs_get",
+        "parameters": [
+          {
+            "name": "goal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Goal Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentRunResponse"
+                  },
+                  "title": "Response List Goal Runs Agent Goals  Goal Id  Runs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/goals/sweep": {
+      "post": {
+        "summary": "Sweep Agent Goals",
+        "operationId": "sweep_agent_goals_agent_goals_sweep_post",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "verification_cooldown_minutes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1440,
+              "minimum": 1,
+              "default": 10,
+              "title": "Verification Cooldown Minutes"
+            }
+          },
+          {
+            "name": "goal_recovery_minutes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10080,
+              "minimum": 15,
+              "default": 180,
+              "title": "Goal Recovery Minutes"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentGoalSweepResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/goals/proactive-from-memory": {
+      "post": {
+        "summary": "Create Proactive Goals From Memory",
+        "operationId": "create_proactive_goals_from_memory_agent_goals_proactive_from_memory_post",
+        "parameters": [
+          {
+            "name": "lookback_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 14,
+              "minimum": 1,
+              "default": 3,
+              "title": "Lookback Days"
+            }
+          },
+          {
+            "name": "recurrence_threshold",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 2,
+              "default": 2,
+              "title": "Recurrence Threshold"
+            }
+          },
+          {
+            "name": "use_llm_distillation",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Use Llm Distillation"
+            }
+          },
+          {
+            "name": "distilled_limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10,
+              "minimum": 1,
+              "default": 3,
+              "title": "Distilled Limit"
+            }
+          },
+          {
+            "name": "max_memory_chars",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 40000,
+              "minimum": 2000,
+              "default": 12000,
+              "title": "Max Memory Chars"
+            }
+          },
+          {
+            "name": "min_distilled_confidence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "default": 0.55,
+              "title": "Min Distilled Confidence"
+            }
+          },
+          {
+            "name": "ttl_seconds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 604800,
+              "minimum": 300,
+              "default": 21600,
+              "title": "Ttl Seconds"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProactiveGoalResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/events": {
+      "post": {
+        "summary": "Ingest Agent Event",
+        "operationId": "ingest_agent_event_agent_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentEventIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEventIngestResponse"
                 }
               }
             }
@@ -977,6 +1438,38 @@
                 }
               ],
               "title": "Session Id"
+            }
+          },
+          {
+            "name": "parent_run_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parent Run Id"
+            }
+          },
+          {
+            "name": "goal_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Goal Key"
             }
           },
           {
@@ -1693,6 +2186,60 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentScheduledTaskBootstrapResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/scheduled-tasks/boost-from-memory": {
+      "post": {
+        "summary": "Boost Patrols From Memory",
+        "operationId": "boost_patrols_from_memory_agent_scheduled_tasks_boost_from_memory_post",
+        "parameters": [
+          {
+            "name": "lookback_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 7,
+              "minimum": 1,
+              "default": 2,
+              "title": "Lookback Days"
+            }
+          },
+          {
+            "name": "boost_cooldown_minutes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1440,
+              "minimum": 1,
+              "default": 30,
+              "title": "Boost Cooldown Minutes"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMemoryPatrolBoostResponse"
                 }
               }
             }
@@ -2890,6 +3437,367 @@
         ],
         "title": "AgentConnectorDeliveryResponse"
       },
+      "AgentEventIngestRequest": {
+        "properties": {
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "scope_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Type"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Id"
+          },
+          "dedup_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedup Key"
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "title": "Ttl Seconds",
+            "default": 600
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_type",
+          "summary"
+        ],
+        "title": "AgentEventIngestRequest"
+      },
+      "AgentEventIngestResponse": {
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted"
+          },
+          "deduped": {
+            "type": "boolean",
+            "title": "Deduped",
+            "default": false
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Id"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "title": "AgentEventIngestResponse"
+      },
+      "AgentGoalResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "root_run_id": {
+            "type": "string",
+            "title": "Root Run Id"
+          },
+          "latest_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Run Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "auto_replan": {
+            "type": "boolean",
+            "title": "Auto Replan"
+          },
+          "step_count": {
+            "type": "integer",
+            "title": "Step Count"
+          },
+          "active_steps": {
+            "type": "integer",
+            "title": "Active Steps"
+          },
+          "completed_steps": {
+            "type": "integer",
+            "title": "Completed Steps"
+          },
+          "failed_steps": {
+            "type": "integer",
+            "title": "Failed Steps"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_planned_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Planned At"
+          },
+          "last_replanned_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Replanned At"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "root_run_id",
+          "status",
+          "auto_replan",
+          "step_count",
+          "active_steps",
+          "completed_steps",
+          "failed_steps",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AgentGoalResponse"
+      },
+      "AgentGoalSweepResponse": {
+        "properties": {
+          "inspected": {
+            "type": "integer",
+            "title": "Inspected"
+          },
+          "synced": {
+            "type": "integer",
+            "title": "Synced"
+          },
+          "replanned": {
+            "type": "integer",
+            "title": "Replanned"
+          },
+          "verified": {
+            "type": "integer",
+            "title": "Verified"
+          },
+          "recovered": {
+            "type": "integer",
+            "title": "Recovered"
+          },
+          "run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Run Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inspected",
+          "synced",
+          "replanned",
+          "verified",
+          "recovered",
+          "run_ids"
+        ],
+        "title": "AgentGoalSweepResponse"
+      },
+      "AgentMemoryPatrolBoostResponse": {
+        "properties": {
+          "scanned": {
+            "type": "integer",
+            "title": "Scanned"
+          },
+          "triggered": {
+            "type": "integer",
+            "title": "Triggered"
+          },
+          "run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Run Ids"
+          },
+          "task_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Task Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scanned",
+          "triggered",
+          "run_ids",
+          "task_ids"
+        ],
+        "title": "AgentMemoryPatrolBoostResponse"
+      },
       "AgentMessageCreate": {
         "properties": {
           "role": {
@@ -3049,6 +3957,202 @@
         ],
         "title": "AgentMessageResponse"
       },
+      "AgentProactiveGoalResponse": {
+        "properties": {
+          "scanned": {
+            "type": "integer",
+            "title": "Scanned"
+          },
+          "candidates": {
+            "type": "integer",
+            "title": "Candidates"
+          },
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "deduped": {
+            "type": "integer",
+            "title": "Deduped"
+          },
+          "rule_candidates": {
+            "type": "integer",
+            "title": "Rule Candidates",
+            "default": 0
+          },
+          "llm_candidates": {
+            "type": "integer",
+            "title": "Llm Candidates",
+            "default": 0
+          },
+          "llm_distillation_used": {
+            "type": "boolean",
+            "title": "Llm Distillation Used",
+            "default": false
+          },
+          "llm_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Error"
+          },
+          "distillation_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distillation Summary"
+          },
+          "strategy_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Summary"
+          },
+          "strategy_directives": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Strategy Directives"
+          },
+          "risk_clusters": {
+            "items": {
+              "$ref": "#/components/schemas/AgentRiskClusterResponse"
+            },
+            "type": "array",
+            "title": "Risk Clusters"
+          },
+          "strategy_feedback_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Feedback Summary"
+          },
+          "feedback_status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Feedback Status Counts"
+          },
+          "feedback_priority_boost": {
+            "type": "integer",
+            "title": "Feedback Priority Boost",
+            "default": 0
+          },
+          "priority_tier": {
+            "type": "string",
+            "title": "Priority Tier",
+            "default": "normal"
+          },
+          "priority_boost": {
+            "type": "integer",
+            "title": "Priority Boost",
+            "default": 0
+          },
+          "priority_score": {
+            "type": "number",
+            "title": "Priority Score",
+            "default": 0.0
+          },
+          "run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Run Ids"
+          },
+          "goal_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Goal Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scanned",
+          "candidates",
+          "created",
+          "deduped",
+          "run_ids",
+          "goal_ids"
+        ],
+        "title": "AgentProactiveGoalResponse"
+      },
+      "AgentRiskClusterResponse": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "recommended_strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommended Strategy"
+          },
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "summary",
+          "severity"
+        ],
+        "title": "AgentRiskClusterResponse"
+      },
       "AgentRunClaimRequest": {
         "properties": {
           "worker_id": {
@@ -3173,6 +4277,39 @@
               }
             ],
             "title": "Trigger Message Id"
+          },
+          "parent_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Run Id"
+          },
+          "goal_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Key"
+          },
+          "step_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Index"
           },
           "created_by_user_id": {
             "anyOf": [
@@ -3333,6 +4470,39 @@
               }
             ],
             "title": "Scheduled Task Id"
+          },
+          "parent_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Run Id"
+          },
+          "goal_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Key"
+          },
+          "step_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Index"
           },
           "created_by_user_id": {
             "anyOf": [
@@ -4275,6 +5445,70 @@
           "updated_at"
         ],
         "title": "AgentSessionResponse"
+      },
+      "AgentSessionUpdate": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "config_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Snapshot"
+          },
+          "state_patch": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Patch"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          }
+        },
+        "type": "object",
+        "title": "AgentSessionUpdate"
       },
       "AgentSubscriptionCreate": {
         "properties": {

@@ -4,7 +4,9 @@ import datetime
 import os
 import threading
 import time
+from urllib.parse import urlparse
 
+import httpx
 from agent.connectors.email.service import EmailConnectorService
 from agent.models import AgentAlert
 from agent.runtime_manager.config import RuntimeManagerSettings
@@ -54,9 +56,14 @@ class AgentServiceRuntime:
         self.enable_email_poller = _env_bool("AGENT_SERVICE_ENABLE_EMAIL_POLLER", True)
         self.enable_supervisor = _env_bool("AGENT_SERVICE_ENABLE_SUPERVISOR", True)
         self.startup_delay_seconds = max(0.0, _env_float("AGENT_SERVICE_STARTUP_DELAY_SECONDS", 2.0))
+        self.startup_grace_seconds = max(
+            self.startup_delay_seconds * 2,
+            _env_float("AGENT_SERVICE_STARTUP_GRACE_SECONDS", 10.0),
+        )
         self.supervisor_poll_seconds = max(2, _env_int("AGENT_SERVICE_SUPERVISOR_POLL_SECONDS", 5))
         self.loop_stale_seconds = max(10, _env_int("AGENT_SERVICE_LOOP_STALE_SECONDS", 45))
         self.started_at = datetime.datetime.utcnow()
+        self.startup_grace_until = self.started_at + datetime.timedelta(seconds=self.startup_grace_seconds)
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._threads: list[threading.Thread] = []
@@ -97,6 +104,7 @@ class AgentServiceRuntime:
         self.email_service = EmailConnectorService() if self.enable_email_poller else None
 
     def start(self) -> None:
+        self._hydrate_open_runtime_alert_rules()
         if self.runtime_manager is not None:
             self._start_loop("runtime")
         if self.scheduler is not None:
@@ -173,6 +181,8 @@ class AgentServiceRuntime:
                 "supervisor_enabled": self.enable_supervisor,
                 "supervisor_poll_seconds": self.supervisor_poll_seconds,
                 "loop_stale_seconds": self.loop_stale_seconds,
+                "startup_grace_seconds": self.startup_grace_seconds,
+                "startup_grace_until": self.startup_grace_until.isoformat(),
                 "loops": loops,
             }
 
@@ -189,6 +199,13 @@ class AgentServiceRuntime:
         if "loop_stale" in open_rules:
             self._resolve_runtime_alert(key, "loop_stale", f"Heartbeat resumed at {now.isoformat()}.")
 
+    def _mark_loop_transient_error(self, key: str, exc: Exception) -> None:
+        now = _utcnow()
+        message = str(exc) or exc.__class__.__name__
+        with self._lock:
+            self._loop_state[key]["last_seen_at"] = now
+            self._loop_state[key]["last_error"] = message
+
     def _mark_loop_error(self, key: str, exc: Exception) -> None:
         now = _utcnow()
         message = str(exc) or exc.__class__.__name__
@@ -201,6 +218,52 @@ class AgentServiceRuntime:
             severity="warning",
             summary=f"{key} loop iteration failed",
             evidence_summary=f"{exc.__class__.__name__}: {message}",
+        )
+
+    def _hydrate_open_runtime_alert_rules(self) -> None:
+        db = SessionLocal()
+        try:
+            alerts = (
+                db.query(AgentAlert)
+                .filter(AgentAlert.status == "open", AgentAlert.scope_type == "service_loop")
+                .all()
+            )
+            with self._lock:
+                for alert in alerts:
+                    loop_key = (alert.scope_id or "").strip()
+                    rule = (alert.source_rule or "").strip()
+                    if loop_key not in self._loop_state or not rule:
+                        continue
+                    self._loop_state[loop_key]["open_alert_rules"].add(rule)
+                    if alert.evidence_summary and not self._loop_state[loop_key]["last_error"]:
+                        self._loop_state[loop_key]["last_error"] = alert.evidence_summary
+        except Exception as exc:
+            print(f"[agent-service] failed to hydrate runtime alerts: {exc}")
+        finally:
+            db.close()
+
+    def _is_local_self_url(self, value: str | None) -> bool:
+        if not value:
+            return False
+        parsed = urlparse(value)
+        hostname = (parsed.hostname or "").lower()
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        return hostname in {"127.0.0.1", "localhost"} and port == 8000
+
+    def _should_suppress_startup_error(self, key: str, exc: Exception) -> bool:
+        if key != "runtime":
+            return False
+        if _utcnow() > self.startup_grace_until:
+            return False
+        if not isinstance(exc, httpx.ConnectError):
+            return False
+        return any(
+            self._is_local_self_url(url)
+            for url in (
+                os.getenv("AGENT_CONTROL_PLANE_URL"),
+                os.getenv("AGENT_EXECUTOR_URL"),
+                os.getenv("AGENT_SERVICE_BASE_URL"),
+            )
         )
 
     def _record_restart(self, key: str) -> None:
@@ -341,8 +404,12 @@ class AgentServiceRuntime:
                 self._mark_loop_ok("runtime")
                 wait_seconds = 0.5 if handled else self.runtime_manager.settings.poll_seconds
             except Exception as exc:
-                self._mark_loop_error("runtime", exc)
-                print(f"[agent-service] runtime loop failed: {exc}")
+                if self._should_suppress_startup_error("runtime", exc):
+                    self._mark_loop_transient_error("runtime", exc)
+                    print(f"[agent-service] runtime loop transient startup failure suppressed: {exc}")
+                else:
+                    self._mark_loop_error("runtime", exc)
+                    print(f"[agent-service] runtime loop failed: {exc}")
                 wait_seconds = 2.0
             if self._stop.wait(wait_seconds):
                 break
