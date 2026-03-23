@@ -26,21 +26,7 @@ function loadStoredUser() {
 }
 
 function AppFallback() {
-    return (
-        <div
-            style={{
-                minHeight: '100vh',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: '#f8fafc',
-                color: '#475569',
-                fontWeight: 600,
-            }}
-        >
-            Loading workspace...
-        </div>
-    );
+    return <div className="app-fallback">正在加载页面...</div>;
 }
 
 function App() {

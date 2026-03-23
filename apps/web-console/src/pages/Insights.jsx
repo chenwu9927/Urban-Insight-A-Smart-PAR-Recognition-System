@@ -1,25 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Calendar, FileText, MessageSquareText, RefreshCw, Sparkles } from 'lucide-react';
 import { api } from '../lib/api';
 
-const Chip = ({ children }) => (
-    <span
-        style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            padding: '0.2rem 0.6rem',
-            borderRadius: '999px',
-            background: '#eef2ff',
-            color: '#3730a3',
-            fontSize: '0.85rem',
-            fontWeight: 600,
-        }}
-    >
-        {children}
-    </span>
-);
-
-const Insights = () => {
+function Insights() {
     const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
     const [selectedDate, setSelectedDate] = useState(today);
     const [files, setFiles] = useState([]);
@@ -37,12 +19,12 @@ const Insights = () => {
         const fetchFiles = async () => {
             try {
                 const response = await api.get('/files');
-                setFiles(response.data.filter((file) => file.status === 'analyzed'));
-            } catch (error) {
-                console.error('Failed to load analyzed files', error);
+                setFiles((response.data || []).filter((file) => file.status === 'analyzed'));
+            } catch (loadError) {
+                console.error('Failed to load analyzed files', loadError);
             }
         };
-        fetchFiles();
+        void fetchFiles();
     }, []);
 
     const fetchInsights = useCallback(async () => {
@@ -58,14 +40,11 @@ const Insights = () => {
             } else {
                 params.set('date', selectedDate);
             }
-
             const response = await api.get(`/insights?${params.toString()}`);
             setData(response.data);
-            setAskData(null);
-            setAskError('');
-        } catch (error) {
-            console.error('Failed to fetch insights', error);
-            setError('Failed to load insight summary.');
+        } catch (loadError) {
+            console.error('Failed to fetch insights', loadError);
+            setError('洞察简报加载失败。');
         } finally {
             setLoading(false);
         }
@@ -94,210 +73,221 @@ const Insights = () => {
 
             const response = await api.post('/insights/ask', payload);
             setAskData(response.data);
-        } catch (error) {
-            console.error('Failed to ask insight question', error);
-            setAskError('Question answering failed.');
+        } catch (askFailure) {
+            console.error('Failed to ask insight question', askFailure);
+            setAskError('提问失败。');
         } finally {
             setAskLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchInsights();
+        void fetchInsights();
     }, [fetchInsights]);
 
     return (
-        <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', gap: '1rem', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <Sparkles size={22} color="#2563eb" />
-                    <h1 style={{ fontSize: '1.8rem', margin: 0 }}>Insights</h1>
-                    {data?.llm_used ? <Chip>LLM</Chip> : <Chip>Rule-based</Chip>}
+        <div className="page-shell">
+            <section className="page-header">
+                <div className="page-title-group">
+                    <span>洞察</span>
+                    <h1>洞察简报</h1>
+                    <p>按日期或文件生成摘要，并继续追问具体问题。</p>
                 </div>
-                <button className="btn-primary" onClick={fetchInsights} disabled={loading} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <RefreshCw size={16} />
-                    Refresh
-                </button>
-            </div>
-
-            <div className="stat-card" style={{ marginBottom: '1.5rem', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', alignItems: 'end' }}>
-                <div>
-                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
-                            <FileText size={16} />
-                            Scope file
-                        </span>
-                    </label>
-                    <select
-                        value={selectedFile}
-                        onChange={(event) => setSelectedFile(event.target.value)}
-                        style={{ width: '100%', padding: '0.6rem', borderRadius: '0.5rem', border: '1px solid #cbd5e1' }}
-                    >
-                        <option value="">Aggregate by date</option>
-                        {files.map((file) => (
-                            <option key={file.id} value={file.id}>
-                                {file.filename}
-                            </option>
-                        ))}
-                    </select>
-                    <p style={{ margin: '0.5rem 0 0', color: '#64748b', fontSize: '0.85rem' }}>
-                        Picking a file overrides the date filter.
-                    </p>
-                </div>
-
-                <div>
-                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
-                            <Calendar size={16} />
-                            Date
-                        </span>
-                    </label>
-                    <input
-                        type="date"
-                        value={selectedDate}
-                        disabled={Boolean(selectedFile)}
-                        onChange={(event) => setSelectedDate(event.target.value)}
-                        style={{ width: '100%', padding: '0.6rem', borderRadius: '0.5rem', border: '1px solid #cbd5e1' }}
-                    />
-                </div>
-
-                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', userSelect: 'none' }}>
-                        <input type="checkbox" checked={useLLM} onChange={(event) => setUseLLM(event.target.checked)} />
-                        Use LLM
-                    </label>
-                    <button className="btn-primary" onClick={fetchInsights} disabled={loading} style={{ height: '42px' }}>
-                        Generate
+                <div className="page-header-actions">
+                    <button type="button" className="btn-primary" onClick={fetchInsights} disabled={loading}>
+                        {loading ? '生成中...' : '刷新简报'}
                     </button>
                 </div>
-            </div>
+            </section>
 
-            {error ? (
-                <div className="stat-card" style={{ border: '1px solid #fecaca', background: '#fef2f2', color: '#991b1b', marginBottom: '1.5rem' }}>
-                    {error}
+            <section className="card">
+                <div className="field-grid three">
+                    <label className="field">
+                        <span>文件范围</span>
+                        <select value={selectedFile} onChange={(event) => setSelectedFile(event.target.value)}>
+                            <option value="">按日期汇总</option>
+                            {files.map((file) => (
+                                <option key={file.id} value={file.id}>
+                                    {file.filename}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+
+                    <label className="field">
+                        <span>日期</span>
+                        <input
+                            type="date"
+                            value={selectedDate}
+                            disabled={Boolean(selectedFile)}
+                            onChange={(event) => setSelectedDate(event.target.value)}
+                        />
+                    </label>
+
+                    <label className="checkbox-field">
+                        <input type="checkbox" checked={useLLM} onChange={(event) => setUseLLM(event.target.checked)} />
+                        <span>使用模型生成内容</span>
+                    </label>
                 </div>
-            ) : null}
+            </section>
 
-            {loading && !data ? <div className="stat-card" style={{ color: '#94a3b8' }}>Generating insight summary...</div> : null}
+            {error ? <div className="notice error">{error}</div> : null}
 
             {data ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem' }}>
-                    <div className="stat-card">
-                        <h3 style={{ marginTop: 0 }}>Summary</h3>
-                        <p style={{ margin: 0, lineHeight: 1.7, color: '#0f172a' }}>{data.summary || 'No summary available.'}</p>
-                        <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                            {data.cached ? <Chip>Cached</Chip> : null}
-                        </div>
-                        {data.derived?.top_periods?.length ? (
-                            <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                {data.derived.top_periods.map((period, index) => (
-                                    <Chip key={index}>
-                                        {period.time}: {period.count}
-                                    </Chip>
-                                ))}
+                <>
+                    <div className="page-grid-2">
+                        <section className="card">
+                            <div className="card-header">
+                                <div>
+                                    <h2 className="card-title">摘要</h2>
+                                    <p className="card-subtitle">{data.llm_used ? '模型生成' : '规则生成'}</p>
+                                </div>
                             </div>
-                        ) : null}
+                            <p className="prose-block">{data.summary || '暂无摘要内容。'}</p>
+                        </section>
+
+                        <section className="card">
+                            <div className="card-header">
+                                <div>
+                                    <h2 className="card-title">范围信息</h2>
+                                    <p className="card-subtitle">当前简报的输入范围。</p>
+                                </div>
+                            </div>
+                            <div className="list">
+                                <div className="list-row">
+                                    <div className="list-row-main">
+                                        <div className="list-row-title">日期</div>
+                                    </div>
+                                    <div className="list-row-meta">
+                                        <span>{data.scope?.date || '--'}</span>
+                                    </div>
+                                </div>
+                                <div className="list-row">
+                                    <div className="list-row-main">
+                                        <div className="list-row-title">文件 ID</div>
+                                    </div>
+                                    <div className="list-row-meta">
+                                        <span>{data.scope?.file_id ?? '--'}</span>
+                                    </div>
+                                </div>
+                                <div className="list-row">
+                                    <div className="list-row-main">
+                                        <div className="list-row-title">行人数量</div>
+                                    </div>
+                                    <div className="list-row-meta">
+                                        <span>{data.stats?.total_pedestrians ?? '--'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
                     </div>
 
-                    <div className="stat-card">
-                        <h3 style={{ marginTop: 0 }}>Scope</h3>
-                        <div style={{ color: '#334155', lineHeight: 1.8 }}>
-                            <div>Date: {data.scope?.date || '-'}</div>
-                            <div>File ID: {data.scope?.file_id ?? '-'}</div>
-                            <div>Interval: {data.scope?.interval ?? '-'}</div>
-                        </div>
-                        <h3 style={{ marginTop: '1.5rem' }}>Stats snapshot</h3>
-                        <div style={{ color: '#334155', lineHeight: 1.8 }}>
-                            <div>Analyses: {data.stats?.total_analyses ?? '-'}</div>
-                            <div>Pedestrians: {data.stats?.total_pedestrians ?? '-'}</div>
-                            <div>Storage used: {data.stats?.storage_used ?? '-'}</div>
-                        </div>
+                    <div className="page-grid-2">
+                        <section className="card">
+                            <div className="card-header">
+                                <div>
+                                    <h2 className="card-title">重点发现</h2>
+                                </div>
+                            </div>
+                            <ul className="simple-list">
+                                {(data.key_findings || []).length ? (
+                                    data.key_findings.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)
+                                ) : (
+                                    <li>暂无重点发现。</li>
+                                )}
+                            </ul>
+                        </section>
+
+                        <section className="card">
+                            <div className="card-header">
+                                <div>
+                                    <h2 className="card-title">建议</h2>
+                                </div>
+                            </div>
+                            <ul className="simple-list">
+                                {(data.recommendations || []).length ? (
+                                    data.recommendations.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)
+                                ) : (
+                                    <li>暂无建议。</li>
+                                )}
+                            </ul>
+                        </section>
+
+                        <section className="card">
+                            <div className="card-header">
+                                <div>
+                                    <h2 className="card-title">异常</h2>
+                                </div>
+                            </div>
+                            <ul className="simple-list">
+                                {(data.anomalies || []).length ? (
+                                    data.anomalies.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)
+                                ) : (
+                                    <li>暂无异常。</li>
+                                )}
+                            </ul>
+                        </section>
+
+                        <section className="card">
+                            <div className="card-header">
+                                <div>
+                                    <h2 className="card-title">待追问问题</h2>
+                                </div>
+                            </div>
+                            <ul className="simple-list">
+                                {(data.questions || []).length ? (
+                                    data.questions.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)
+                                ) : (
+                                    <li>暂无待追问问题。</li>
+                                )}
+                            </ul>
+                        </section>
                     </div>
 
-                    <div className="stat-card" style={{ gridColumn: '1 / -1' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                    <section className="card">
+                        <div className="card-header">
                             <div>
-                                <h3 style={{ marginTop: 0 }}>Key findings</h3>
-                                <ul style={{ margin: 0, paddingLeft: '1.2rem', color: '#0f172a', lineHeight: 1.8 }}>
-                                    {(data.key_findings || []).length
-                                        ? data.key_findings.map((item, index) => <li key={index}>{item}</li>)
-                                        : <li>No findings available.</li>}
-                                </ul>
-                            </div>
-                            <div>
-                                <h3 style={{ marginTop: 0 }}>Recommendations</h3>
-                                <ul style={{ margin: 0, paddingLeft: '1.2rem', color: '#0f172a', lineHeight: 1.8 }}>
-                                    {(data.recommendations || []).length
-                                        ? data.recommendations.map((item, index) => <li key={index}>{item}</li>)
-                                        : <li>No recommendations available.</li>}
-                                </ul>
-                            </div>
-                            <div>
-                                <h3 style={{ marginTop: 0 }}>Anomalies</h3>
-                                <ul style={{ margin: 0, paddingLeft: '1.2rem', color: '#0f172a', lineHeight: 1.8 }}>
-                                    {(data.anomalies || []).length
-                                        ? data.anomalies.map((item, index) => <li key={index}>{item}</li>)
-                                        : <li>No anomalies detected.</li>}
-                                </ul>
-                            </div>
-                            <div>
-                                <h3 style={{ marginTop: 0 }}>Open questions</h3>
-                                <ul style={{ margin: 0, paddingLeft: '1.2rem', color: '#0f172a', lineHeight: 1.8 }}>
-                                    {(data.questions || []).length
-                                        ? data.questions.map((item, index) => <li key={index}>{item}</li>)
-                                        : <li>No follow-up questions.</li>}
-                                </ul>
+                                <h2 className="card-title">继续提问</h2>
+                                <p className="card-subtitle">在当前范围内继续追问细节。</p>
                             </div>
                         </div>
-                    </div>
 
-                    <div className="stat-card" style={{ gridColumn: '1 / -1' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', gap: '1rem', flexWrap: 'wrap' }}>
-                            <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <MessageSquareText size={18} />
-                                Ask the insight engine
-                            </h3>
-                            {askData?.llm_used ? <Chip>LLM</Chip> : <Chip>Rule-based</Chip>}
+                        <div className="field-grid one">
+                            <label className="field">
+                                <span>问题</span>
+                                <textarea
+                                    value={question}
+                                    onChange={(event) => setQuestion(event.target.value)}
+                                    placeholder="例如：最繁忙的时段是什么？有哪些异常值得继续排查？"
+                                />
+                            </label>
                         </div>
-                        <div style={{ display: 'flex', gap: '0.75rem' }}>
-                            <input
-                                value={question}
-                                onChange={(event) => setQuestion(event.target.value)}
-                                onKeyDown={(event) => {
-                                    if (event.key === 'Enter') {
-                                        askQuestion();
-                                    }
-                                }}
-                                placeholder="Example: When was the busiest period and what stands out?"
-                                style={{ flex: 1, padding: '0.7rem 0.8rem', borderRadius: '0.6rem', border: '1px solid #cbd5e1' }}
-                            />
-                            <button className="btn-primary" onClick={askQuestion} disabled={askLoading || !question.trim()} style={{ minWidth: '92px' }}>
-                                {askLoading ? 'Thinking...' : 'Ask'}
+
+                        <div className="action-row">
+                            <button type="button" className="btn-primary" onClick={askQuestion} disabled={askLoading || !question.trim()}>
+                                {askLoading ? '处理中...' : '提交问题'}
                             </button>
                         </div>
-                        {askError ? <div style={{ marginTop: '0.75rem', color: '#991b1b' }}>{askError}</div> : null}
+
+                        {askError ? <div className="notice error">{askError}</div> : null}
+
                         {askData ? (
-                            <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem' }}>
-                                <div>
-                                    <div style={{ color: '#334155', fontSize: '0.9rem' }}>Question</div>
-                                    <div style={{ marginTop: '0.5rem', color: '#0f172a', lineHeight: 1.8 }}>{askData.answer || 'No answer available.'}</div>
-                                    {askData.cached ? (
-                                        <div style={{ marginTop: '0.75rem' }}>
-                                            <Chip>Cached</Chip>
-                                        </div>
-                                    ) : null}
+                            <div className="page-grid-2 inner-grid">
+                                <div className="card subtle-card">
+                                    <h3>回答</h3>
+                                    <p className="prose-block">{askData.answer || '暂无回答。'}</p>
                                 </div>
-                                <div>
-                                    <div style={{ color: '#334155', fontSize: '0.9rem' }}>Query</div>
-                                    <div style={{ marginTop: '0.5rem', color: '#0f172a', lineHeight: 1.7 }}>{askData.question}</div>
+                                <div className="card subtle-card">
+                                    <h3>问题</h3>
+                                    <p className="prose-block">{askData.question}</p>
                                 </div>
                             </div>
                         ) : null}
-                    </div>
-                </div>
+                    </section>
+                </>
             ) : null}
         </div>
     );
-};
+}
 
 export default Insights;

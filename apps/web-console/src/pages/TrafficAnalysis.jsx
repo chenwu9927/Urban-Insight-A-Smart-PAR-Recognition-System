@@ -3,24 +3,45 @@ import { useLocation } from 'react-router-dom';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api } from '../lib/api';
 
-const TrafficAnalysis = () => {
+function translateGenderLabel(value) {
+    const mapping = {
+        Male: '男',
+        Female: '女',
+    };
+    return mapping[value] || value || '--';
+}
+
+function translateAgeLabel(value) {
+    const mapping = {
+        Child: '儿童',
+        Teen: '青少年',
+        Young: '青年',
+        Adult: '成人',
+        Old: '老年',
+    };
+    return mapping[value] || value || '--';
+}
+
+function TrafficAnalysis() {
     const location = useLocation();
     const [files, setFiles] = useState([]);
     const [selectedFile, setSelectedFile] = useState(location.state?.fileId || '');
     const [loading, setLoading] = useState(false);
     const [stats, setStats] = useState(null);
     const [interval, setInterval] = useState(5);
+    const [error, setError] = useState('');
 
     useEffect(() => {
         const fetchFiles = async () => {
             try {
                 const response = await api.get('/files');
-                setFiles(response.data.filter((file) => file.status === 'analyzed'));
-            } catch (error) {
-                console.error('Failed to fetch files', error);
+                setFiles((response.data || []).filter((file) => file.status === 'analyzed'));
+            } catch (loadError) {
+                console.error('Failed to fetch files', loadError);
+                setError('已分析文件列表加载失败。');
             }
         };
-        fetchFiles();
+        void fetchFiles();
     }, []);
 
     const analyzeTraffic = useCallback(async () => {
@@ -28,11 +49,13 @@ const TrafficAnalysis = () => {
             return;
         }
         setLoading(true);
+        setError('');
         try {
             const response = await api.get(`/stats?file_id=${selectedFile}&interval=${interval}`);
             setStats(response.data);
-        } catch (error) {
-            console.error('Failed to analyze traffic', error);
+        } catch (loadError) {
+            console.error('Failed to analyze traffic', loadError);
+            setError('客流分析请求失败。');
         } finally {
             setLoading(false);
         }
@@ -40,106 +63,124 @@ const TrafficAnalysis = () => {
 
     useEffect(() => {
         if (selectedFile) {
-            analyzeTraffic();
+            void analyzeTraffic();
         }
     }, [analyzeTraffic, selectedFile]);
 
     return (
-        <div>
-            <h1 style={{ fontSize: '1.8rem', marginBottom: '2rem' }}>Traffic Analysis</h1>
-
-            <div className="stat-card" style={{ marginBottom: '2rem', display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: '280px' }}>
-                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Analyzed source file</label>
-                    <select
-                        value={selectedFile}
-                        onChange={(event) => setSelectedFile(event.target.value)}
-                        style={{ width: '100%', padding: '0.6rem', borderRadius: '0.5rem', border: '1px solid #cbd5e1' }}
-                    >
-                        <option value="">Select a video or image file</option>
-                        {files.map((file) => (
-                            <option key={file.id} value={file.id}>
-                                {file.filename}
-                            </option>
-                        ))}
-                    </select>
+        <div className="page-shell">
+            <section className="page-header">
+                <div className="page-title-group">
+                    <span>分析</span>
+                    <h1>客流分析</h1>
+                    <p>选择一个已经分析完成的文件，按时间粒度查看人数变化和结构分布。</p>
                 </div>
-
-                <div style={{ width: '180px' }}>
-                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Bucket size</label>
-                    <select
-                        value={interval}
-                        onChange={(event) => setInterval(Number(event.target.value))}
-                        style={{ width: '100%', padding: '0.6rem', borderRadius: '0.5rem', border: '1px solid #cbd5e1' }}
-                    >
-                        <option value={1}>1 minute</option>
-                        <option value={5}>5 minutes</option>
-                        <option value={30}>30 minutes</option>
-                        <option value={60}>1 hour</option>
-                    </select>
+                <div className="page-header-actions">
+                    <button type="button" className="btn-primary" onClick={analyzeTraffic} disabled={!selectedFile || loading}>
+                        {loading ? '生成中...' : '生成报告'}
+                    </button>
                 </div>
+            </section>
 
-                <button className="btn-primary" onClick={analyzeTraffic} disabled={!selectedFile || loading} style={{ height: '42px' }}>
-                    {loading ? 'Loading...' : 'Generate report'}
-                </button>
-            </div>
+            {error ? <div className="notice error">{error}</div> : null}
+
+            <section className="card">
+                <div className="field-grid two">
+                    <label className="field">
+                        <span>分析文件</span>
+                        <select value={selectedFile} onChange={(event) => setSelectedFile(event.target.value)}>
+                            <option value="">请选择文件</option>
+                            {files.map((file) => (
+                                <option key={file.id} value={file.id}>
+                                    {file.filename}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+
+                    <label className="field">
+                        <span>统计间隔</span>
+                        <select value={interval} onChange={(event) => setInterval(Number(event.target.value))}>
+                            <option value={1}>1 分钟</option>
+                            <option value={5}>5 分钟</option>
+                            <option value={30}>30 分钟</option>
+                            <option value={60}>60 分钟</option>
+                        </select>
+                    </label>
+                </div>
+            </section>
 
             {stats ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-                    <div className="stat-card" style={{ height: '400px', gridColumn: '1 / -1', display: 'flex', flexDirection: 'column' }}>
-                        <h3 style={{ marginBottom: '1.5rem' }}>Traffic over time</h3>
-                        <div style={{ flex: 1 }}>
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={stats.traffic_trend} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                                    <defs>
-                                        <linearGradient id="traffic-analysis-fill" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#2563eb" stopOpacity={0.16} />
-                                            <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
+                <>
+                    <section className="card">
+                        <div className="card-header">
+                            <div>
+                                <h2 className="card-title">人数趋势</h2>
+                                <p className="card-subtitle">查看不同时间段的人流变化。</p>
+                            </div>
+                        </div>
+                        <div className="chart-box">
+                            <ResponsiveContainer width="100%" height={320}>
+                                <AreaChart data={stats.traffic_trend || []}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                                     <XAxis dataKey="time" />
                                     <YAxis />
                                     <Tooltip />
-                                    <Area type="monotone" dataKey="count" stroke="#2563eb" fillOpacity={1} fill="url(#traffic-analysis-fill)" />
+                                    <Area type="monotone" dataKey="count" stroke="#8f6b52" fill="#d9c4b1" fillOpacity={0.55} />
                                 </AreaChart>
                             </ResponsiveContainer>
                         </div>
-                    </div>
+                    </section>
 
-                    <div className="stat-card">
-                        <h3>Gender mix</h3>
-                        {Object.entries(stats.gender_distribution || {}).map(([key, value]) => (
-                            <div key={key} style={{ marginTop: '1rem' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                                    <span>{key}</span>
-                                    <span>{value}%</span>
-                                </div>
-                                <div style={{ width: '100%', height: '8px', background: '#f1f5f9', borderRadius: '4px' }}>
-                                    <div style={{ width: `${value}%`, height: '100%', background: '#2563eb', borderRadius: '4px' }} />
+                    <div className="page-grid-2">
+                        <section className="card">
+                            <div className="card-header">
+                                <div>
+                                    <h2 className="card-title">性别分布</h2>
+                                    <p className="card-subtitle">基于当前文件的识别结果。</p>
                                 </div>
                             </div>
-                        ))}
-                    </div>
+                            <div className="meter-list">
+                                {Object.entries(stats.gender_distribution || {}).map(([key, value]) => (
+                                    <div key={key} className="meter-row">
+                                        <div className="meter-row-head">
+                                            <span>{translateGenderLabel(key)}</span>
+                                            <strong>{value}%</strong>
+                                        </div>
+                                        <div className="meter-track">
+                                            <div className="meter-fill" style={{ width: `${value}%` }} />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
 
-                    <div className="stat-card">
-                        <h3>Age mix</h3>
-                        {Object.entries(stats.age_distribution || {}).map(([key, value]) => (
-                            <div key={key} style={{ marginTop: '1rem' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                                    <span>{key}</span>
-                                    <span>{value}%</span>
-                                </div>
-                                <div style={{ width: '100%', height: '8px', background: '#f1f5f9', borderRadius: '4px' }}>
-                                    <div style={{ width: `${value}%`, height: '100%', background: '#10b981', borderRadius: '4px' }} />
+                        <section className="card">
+                            <div className="card-header">
+                                <div>
+                                    <h2 className="card-title">年龄分布</h2>
+                                    <p className="card-subtitle">按年龄段汇总占比。</p>
                                 </div>
                             </div>
-                        ))}
+                            <div className="meter-list">
+                                {Object.entries(stats.age_distribution || {}).map(([key, value]) => (
+                                    <div key={key} className="meter-row">
+                                        <div className="meter-row-head">
+                                            <span>{translateAgeLabel(key)}</span>
+                                            <strong>{value}%</strong>
+                                        </div>
+                                        <div className="meter-track">
+                                            <div className="meter-fill alt" style={{ width: `${value}%` }} />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
                     </div>
-                </div>
+                </>
             ) : null}
         </div>
     );
-};
+}
 
 export default TrafficAnalysis;

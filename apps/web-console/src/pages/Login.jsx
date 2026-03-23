@@ -21,7 +21,7 @@ const Login = ({ onLogin }) => {
                 onLogin(response.data.user);
             }
         } catch (err) {
-            setError(err.response?.data?.detail || 'Login failed. Please verify your credentials and try again.');
+            setError(err.response?.data?.detail || '登录失败，请检查用户名和密码。');
         } finally {
             setLoading(false);
         }
@@ -29,71 +29,57 @@ const Login = ({ onLogin }) => {
 
     return (
         <div className="auth-shell">
-            <div className="auth-panel">
-                <div className="auth-brand">
-                    <div className="auth-brand-icon">
-                        <ShieldCheck size={36} />
+            <div className="auth-card">
+                <div className="auth-header">
+                    <div className="auth-icon">
+                        <ShieldCheck size={30} />
                     </div>
                     <div>
-                        <span className="auth-eyebrow">Urban Insight Client</span>
-                        <h1>Sign in to the operations workspace.</h1>
-                        <p>
-                            Access evidence management, retrieval, analytics, and the always-on agent from one secure
-                            client console.
-                        </p>
-                    </div>
-                </div>
-
-                <div className="auth-feature-strip">
-                    <div>
-                        <strong>Live agent</strong>
-                        <span>Monitor active runs and receive operational feedback in real time.</span>
-                    </div>
-                    <div>
-                        <strong>Unified workflow</strong>
-                        <span>Move from upload to retrieval and insight review without switching tools.</span>
+                        <span className="auth-caption">城市洞察</span>
+                        <h1>登录工作台</h1>
+                        <p>登录后可以访问文件库、检索、客流分析、洞察简报和常驻智能体。</p>
                     </div>
                 </div>
 
                 <form className="auth-form" onSubmit={handleSubmit}>
                     {error ? (
-                        <div className="auth-error">
+                        <div className="notice error">
                             <AlertCircle size={16} />
                             <span>{error}</span>
                         </div>
                     ) : null}
 
-                    <label className="auth-field">
-                        <span>Username</span>
-                        <div className="auth-input-wrap">
-                            <User size={18} />
+                    <label className="field">
+                        <span>用户名</span>
+                        <div className="input-wrap">
+                            <User size={16} />
                             <input
                                 type="text"
                                 value={username}
                                 onChange={(event) => setUsername(event.target.value)}
-                                placeholder="Enter your username"
+                                placeholder="请输入用户名"
                                 required
                             />
                         </div>
                     </label>
 
-                    <label className="auth-field">
-                        <span>Password</span>
-                        <div className="auth-input-wrap">
-                            <Lock size={18} />
+                    <label className="field">
+                        <span>密码</span>
+                        <div className="input-wrap">
+                            <Lock size={16} />
                             <input
                                 type="password"
                                 value={password}
                                 onChange={(event) => setPassword(event.target.value)}
-                                placeholder="Enter your password"
+                                placeholder="请输入密码"
                                 required
                             />
                         </div>
                     </label>
 
-                    <button type="submit" className="auth-submit" disabled={loading}>
-                        <LogIn size={18} />
-                        {loading ? 'Signing in...' : 'Sign in'}
+                    <button type="submit" className="btn-primary auth-submit" disabled={loading}>
+                        <LogIn size={16} />
+                        {loading ? '登录中...' : '登录'}
                     </button>
                 </form>
             </div>

@@ -2,115 +2,169 @@
 
 ## 1. 设计结论
 
-参考 `reference/picoclaw` 之后，我们把 Agent 方案收敛为一条更简单的主线：
+当前 Agent 的正确形态不是“很多子服务拼起来的复杂平台”，而是一个持续运行、边界清晰的 `agent-service`。
 
-- 默认只部署一个常驻进程 `agent-service`
-- 这个进程内部包含 5 类能力：会话控制、任务执行、定时巡检、邮件联络、文件式记忆
-- 业务能力仍然来自现有微服务：`auth / media / analysis / search / insight`
-- 只有在后续出现明显吞吐瓶颈时，才把 `runtime-manager / executor / scheduler / email` 再拆回独立服务
+这个服务负责：
 
-这比之前的“重 control-plane + 多个 agent 子服务”更接近 `picoclaw` 的实际风格，也更适合你的项目当前阶段。
+- 接收任务
+- 维护会话和目标
+- 调用业务服务工具
+- 进行自主规划与重规划
+- 维护长短期记忆
+- 常态化巡检
+- 通过邮件和前端与管理员协作
 
-## 2. 参考依据
+这条线参考了 `reference/picoclaw` 的核心思想，但实现深度适配了当前 Python 服务架构与现有业务服务。
 
-这次对齐主要参考了下面这些真实源码，而不是抽象想象：
+## 2. 设计原则
 
-- `reference/picoclaw/pkg/agent/loop.go`
-- `reference/picoclaw/pkg/tools/toolloop.go`
-- `reference/picoclaw/pkg/tools/registry.go`
-- `reference/picoclaw/pkg/session/manager.go`
-- `reference/picoclaw/pkg/agent/memory.go`
-- `reference/picoclaw/pkg/cron/service.go`
-- `reference/picoclaw/workspace/AGENTS.md`
-- `reference/picoclaw/workspace/memory/MEMORY.md`
-- `reference/picoclaw/docs/agent-refactor/README.md`
+遵循 5 条原则：
 
-从这些实现里，最值得借鉴的不是“功能越多越好”，而是 4 条原则：
+1. Agent 主体保持单一常驻服务，先做稳，再考虑拆分。
+2. 记忆优先做成可读、可审查、可恢复的文件式系统。
+3. 工具必须受控、可审计，不做无限自由工具市场。
+4. 自主性来自 loop、memory、goal、verification 的闭环，而不是“多加几个接口”。
+5. 任何高风险能力都要通过明确策略、验证和恢复机制兜底。
 
-1. Agent 模型要小而稳定。
-2. 记忆先做成可读、可落盘、可恢复的文件系统能力。
-3. 调度、会话、工具循环都是运行时的一部分，不必先拆成很多服务。
-4. 新概念要克制，先把当前能力跑稳。
-
-## 3. 当前推荐架构
+## 3. 当前运行结构
 
 ```mermaid
 flowchart LR
-    Manager["管理员 (Email)"] --> Agent["agent-service"]
+    Manager["管理员 (Web / Email)"] --> Agent["agent-service"]
     Agent --> Auth["auth-service"]
     Agent --> Media["media-service"]
     Agent --> Analysis["analysis-service"]
     Agent --> Search["search-service"]
     Agent --> Insight["insight-service"]
     Agent --> PG[(PostgreSQL)]
-    Agent --> Workspace["agent workspace/memory"]
-    Frontend["Frontend"] --> Gateway["Nginx / Gateway"]
-    Gateway --> Auth
-    Gateway --> Media
-    Gateway --> Analysis
-    Gateway --> Search
-    Gateway --> Insight
-    Gateway --> Agent
+    Agent --> Memory["workspace/memory"]
 ```
 
-`agent-service` 内部包含这些模块：
+`agent-service` 内部包含 6 组核心模块：
 
 - `control_plane`
-  - 保存 `session / message / run / scheduled_task / approval / delivery`
-- `executor`
-  - 调用业务微服务并执行受控工具
 - `runtime_manager`
-  - 持续拉取待执行 run，发送 heartbeat，回写结果
+- `executor`
 - `scheduler`
-  - 扫描 due task，派发常态巡检
 - `connector_email`
-  - 处理收信、回执、结果回邮
 - `memory_store`
-  - 维护 `workspace/memory/MEMORY.md` 与每日笔记
 
-## 4. Agent 的最小稳定模型
+## 4. 长短期记忆
 
-参考 `picoclaw`，当前 Agent 只保留 5 个核心概念：
+### 短期记忆
+
+短期记忆存放在数据库中，核心对象包括：
 
 - `session`
-  - 一段长期上下文，来源可以是邮件任务、巡检主题或事件调查
 - `message`
-  - 这段上下文里的输入输出记录
 - `run`
-  - 一次实际执行，是真正的调度单位
+- `goal`
 - `scheduled_task`
-  - 周期巡检定义
-- `memory`
-  - 长期记忆和最近运行笔记
+- `approval`
+- `alert`
 
-我们暂时不把 memory、artifact、incident 再继续扩成更多独立服务。数据库里的扩展表会保留，但默认不作为第一优先级能力。
+这些对象用于承载当前工作上下文、执行链、审批状态与告警状态。
 
-## 5. 记忆设计
+### 长期记忆
 
-`picoclaw` 的关键启发是：记忆先做成文件，而不是先做复杂知识库。
+长期记忆保持为文件式结构：
 
-当前实现采用：
+- `workspace/memory/MEMORY.md`
+- `workspace/memory/YYYYMM/YYYYMMDD.md`
 
-- 长期记忆：`<workspace>/memory/MEMORY.md`
-- 每日笔记：`<workspace>/memory/YYYYMM/YYYYMMDD.md`
+设计原因：
 
-当前支持的记忆动作：
+- 重启后仍然存在
+- 人可以直接审阅
+- 适合每天巡检和长期运营记录
+- 不依赖额外的专用记忆服务
 
-- `memory.get_context`
-- `memory.read_long_term`
-- `memory.write_long_term`
-- `memory.append_daily_note`
+### 记忆写回
 
-这样做的好处是：
+当前已经具备：
 
-- 重启后仍然保留
-- 人能直接审阅
-- 不依赖额外服务
-- 很适合 24 小时巡检 agent 的运行记录
+- daily note 自动写回
+- 长期记忆写回
+- strategy feedback 写回
+- proactive goal 与巡检结果写回
 
-## 6. 工具设计
+## 5. Agent 自主链
 
-这版 agent 不走“无限工具市场”，只保留与你项目直接相关的受控工具。
+当前 Agent 的自主链已经不是单步 worker，而是完整的自治闭环：
+
+1. `ContextBuilder`
+   - 组装身份、时间、会话摘要、长期记忆、近期 daily notes、战略上下文
+2. `ToolLoop`
+   - 通过 LLM 在多轮中选择工具、读取结果、继续推理
+3. `GoalPlanner`
+   - 把目标拆成步骤，派生 follow-up runs
+4. `Verification`
+   - 验证工具结果，失败时重试、fallback、replan
+5. `MemoryWriteback`
+   - 将结果、观察和策略反馈写回 daily notes 与长期记忆
+6. `ProactiveGoals`
+   - 从长期记忆与 daily notes 中主动提取新目标
+
+## 6. Goal 生命周期
+
+当前 goal 生命周期包括：
+
+- 创建 `root run`
+- 拆解步骤
+- follow-up step 派生
+- 失败后自动 `replan`
+- 长时间无进展时 `goal_recovery`
+- 所有步骤完成后 `verification`
+- 完成或阻塞状态回写
+
+这意味着 Agent 已经能够长期追踪一个目标，而不只是对单轮请求做响应。
+
+## 7. Proactive 与蒸馏
+
+当前 Agent 已具备主动工作能力。
+
+### 规则与记忆驱动
+
+- recurring patrol signal 会提升巡检优先级
+- 历史 incident / backlog / failure 记忆可以触发 proactive goal
+
+### LLM-assisted memory distillation
+
+当前蒸馏链会从长期记忆与 recent daily notes 中提取：
+
+- `goals`
+- `strategy_summary`
+- `strategy_directives`
+- `risk_clusters`
+- `priority_tier`
+
+随后这些结果会进入：
+
+- proactive goal 生成
+- execution policy
+- planner
+- verification
+- scheduler
+
+## 8. Strategy-aware execution
+
+Agent 不只是“知道目标”，还会根据战略上下文改变执行行为。
+
+当前已经接入：
+
+- strategy-aware tool selection
+- strategy-aware tool ordering
+- strategy-aware verification
+- strategy-aware retry budget
+- strategy-aware fallback chain
+- strategy feedback loop
+- feedback-aware rescheduling
+
+这使得 Agent 在高风险或紧急场景下会自动提高验证强度、重试策略和调度优先级。
+
+## 9. 工具体系
+
+当前工具保持受控集合，不做开放式插件市场。
 
 ### 业务工具
 
@@ -127,6 +181,13 @@ flowchart LR
 - `patrol.analysis_failures`
 - `patrol.approval_timeout`
 
+### Agent 自身工具
+
+- `agent.get_overview`
+- `agent.get_runtime_status`
+- `agent.list_alerts`
+- `agent.chat`
+
 ### 记忆工具
 
 - `memory.get_context`
@@ -134,80 +195,71 @@ flowchart LR
 - `memory.write_long_term`
 - `memory.append_daily_note`
 
-原则是：先把确定的内部工具做扎实，再考虑更开放的 LLM 自主工具选择。
+## 10. 24x7 运行方式
 
-## 7. 24 小时运行方式
-
-`agent-service` 启动后默认开启 3 条后台循环：
+`agent-service` 启动后会拉起后台 loop：
 
 1. `runtime loop`
    - claim run
    - heartbeat
-   - 调 executor
-   - complete/fail
+   - 调用 executor
+   - 回写 complete / fail
 2. `scheduler loop`
-   - 扫描 due 的巡检任务
-   - 生成新的 run
+   - 派发 due scheduled tasks
+   - 执行 goal sweep
+   - 执行 patrol boost
+   - 执行 proactive generation
 3. `email loop`
-   - 扫描已完成 run
-   - 回发 ACK、结果和审批邮件
+   - 处理入站邮件
+   - 发送 ACK、结果回邮和告警通知
 
-这正是你要的“服务器上 24 小时全天候运行”的基础形态。
+前端不是 Agent 的宿主。即使前端页面没有打开，Agent 仍会继续运行。
 
-## 8. 邮件协作模型
+## 11. 与前端和邮件的关系
 
-邮件仍然是首个正式入口，但现在它只是 `agent-service` 的一个 connector，而不是单独的大系统。
+当前管理员与 Agent 的协作入口有两个：
 
-流程：
+- Web Console
+- Email
 
-1. 管理员发送邮件
-2. 入站邮件转成 `session + message + run`
-3. runtime 执行
-4. 结果回邮
-5. 如需审批，发送 `[APPROVAL:<id>]` 邮件
+二者都进入同一套 `session / message / run / goal` 运行时模型，不是两套割裂系统。
 
-## 9. 和旧方案的关系
+这保证了：
 
-这条线已经继续收敛了一步：
+- 前端能看到历史消息、当前运行状态、goal、审批、告警
+- 邮件任务也会进入统一审计链
+- 无论从哪条入口发起任务，后续执行与历史归档都是统一的
 
-- 旧的 `microservices/agent_*` 独立入口已经退出主仓库
-- 默认且唯一的部署入口是 `agents/agent_service/app.py`
-- `control_plane / executor / runtime_manager / scheduler / connector_email` 作为 `agent/` 内部模块继续保留
+## 12. 当前状态判断
 
-这意味着我们保留清晰的代码边界，但不再保留一套额外的 legacy 部署外壳。
+当前 Agent 已经达到“高自主运行基础版”的标准：
 
-## 10. 当前实现对齐结果
+- 有长短期记忆
+- 有多轮工具循环
+- 有 goal lifecycle
+- 有 proactive goal
+- 有 strategy-aware execution
+- 有 feedback-aware rescheduling
+- 有持续运行与前端/邮件双入口
 
-代码已经按这个方向收敛：
+但仍然保持了工程克制：
 
-- 统一服务入口：`agents/agent_service/app.py`
-- 新增统一后台运行器：`agent/service_runtime.py`
-- 新增文件式记忆：`agent/memory_store.py`
-- `executor` 已支持记忆动作
-- `docker-compose.yml` 默认部署改为单个 `agent-service`
+- 仍是单一 `agent-service`
+- 仍以受控工具为主
+- 仍以文件式长期记忆为主
+- 仍未过早引入更多基础设施
 
-## 11. 已落地的首批巡检
+## 13. 后续建议
 
-当前已经落地 3 个默认巡检模板，可通过：
+当前不建议继续扩大战线。后续更合理的是：
 
-- `POST /agent/scheduled-tasks/bootstrap-defaults`
+1. 继续做真实环境联调和运行观察
+2. 用真实运营数据修正 proactive distillation 与 priority policy
+3. 在真实负载出现后，再决定是否拆分 Agent 子服务
+4. 视需要引入 Redis / Queue / Monitoring，而不是提前堆栈
 
-自动创建：
+## 14. 关联文档
 
-- `Patrol: Analysis Backlog`
-- `Patrol: Analysis Failures`
-- `Patrol: Approval Timeout`
-
-对应的内部动作分别是：
-
-- `patrol.analysis_backlog`
-- `patrol.analysis_failures`
-- `patrol.approval_timeout`
-
-## 12. 后续实现顺序
-
-接下来建议按这个顺序继续：
-
-1. 做简单告警和订阅
-2. 再做 incident 聚合
-3. 最后再决定是否把 agent 再次拆成独立子服务
+- `docs/project-blueprint.md`
+- `docs/agent-autonomy-phase14.md`
+- `contracts/http/agent-service.openapi.json`

@@ -1,344 +1,503 @@
-﻿import { useState, useEffect } from 'react';
-import { api, apiUrl } from '../lib/api';
-import { Upload, FileVideo, FileImage, Trash2, Search, BarChart2, Loader2, CheckCircle, AlertCircle, Calendar } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { api } from '../lib/api';
 
-const FileLibrary = () => {
-    const [files, setFiles] = useState([]);
-    const [uploading, setUploading] = useState(false);
-    const [processing, setProcessing] = useState(null);
-    const [progressByFile, setProgressByFile] = useState({});
-    const [etaByFile, setEtaByFile] = useState({});
-    const [showUploadModal, setShowUploadModal] = useState(false);
-    const [selectedUploadFile, setSelectedUploadFile] = useState(null);
-    const [startTime, setStartTime] = useState('');
+const ACTIVE_TASK_STATUSES = new Set(['queued', 'running']);
+
+const emptyUploadState = {
+    file: null,
+    startTime: '',
+    autoAnalyze: true,
+};
+
+function formatDateTime(value) {
+    if (!value) {
+        return '--';
+    }
+    try {
+        return new Date(value).toLocaleString('zh-CN');
+    } catch {
+        return value;
+    }
+}
+
+function formatBytes(value) {
+    const size = Number(value);
+    if (!Number.isFinite(size) || size <= 0) {
+        return '0 B';
+    }
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const exponent = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1);
+    const normalized = size / 1024 ** exponent;
+    return `${normalized.toFixed(normalized >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+}
+
+function toLocalInputValue(date) {
+    const current = date instanceof Date ? date : new Date();
+    return new Date(current.getTime() - current.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function getTaskLabel(status) {
+    const mapping = {
+        queued: '排队中',
+        running: '分析中',
+        completed: '已完成',
+        failed: '失败',
+    };
+    return mapping[status] || status || '--';
+}
+
+function getFileTypeLabel(value) {
+    const mapping = {
+        image: '图片',
+        video: '视频',
+    };
+    return mapping[value] || value || '--';
+}
+
+function getFileStatus(file, task) {
+    if (task && ACTIVE_TASK_STATUSES.has(task.status)) {
+        return {
+            label: task.status === 'queued' ? '排队中' : '分析中',
+            detail: task.status === 'queued' ? '等待工作线程领取任务。' : '识别和提取正在进行。',
+        };
+    }
+    if (file.status === 'analyzed') {
+        return {
+            label: '已分析',
+            detail: '可以用于检索和客流分析。',
+        };
+    }
+    if (file.status === 'error') {
+        return {
+            label: '失败',
+            detail: '上一次分析失败，可以重新发起。',
+        };
+    }
+    return {
+        label: '已上传',
+        detail: '文件已入库，尚未开始分析。',
+    };
+}
+
+function FileLibrary() {
     const navigate = useNavigate();
+    const fileInputRef = useRef(null);
+    const [files, setFiles] = useState([]);
+    const [analysisTasks, setAnalysisTasks] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [uploading, setUploading] = useState(false);
+    const [actionFileId, setActionFileId] = useState(null);
+    const [showUploadModal, setShowUploadModal] = useState(false);
+    const [uploadDraft, setUploadDraft] = useState(emptyUploadState);
+    const [libraryError, setLibraryError] = useState('');
+    const [libraryNotice, setLibraryNotice] = useState('');
 
-    const fetchFiles = async () => {
+    const hasActiveTasks = analysisTasks.some((task) => ACTIVE_TASK_STATUSES.has(task.status));
+
+    const loadLibrary = async ({ silent = false } = {}) => {
+        if (!silent) {
+            setLoading(true);
+        }
+
         try {
-            const res = await api.get('/files');
-            setFiles(res.data);
-        } catch (err) {
-            console.error("Failed to fetch files", err);
+            const [filesResponse, tasksResponse] = await Promise.all([
+                api.get('/files'),
+                api.get('/analyze/tasks', { params: { limit: 12 } }),
+            ]);
+            setFiles(filesResponse.data || []);
+            setAnalysisTasks(tasksResponse.data || []);
+            setLibraryError('');
+        } catch (error) {
+            console.error('Failed to load library data', error);
+            setLibraryError('文件库数据刷新失败。');
+        } finally {
+            if (!silent) {
+                setLoading(false);
+            }
         }
     };
 
     useEffect(() => {
-        fetchFiles();
+        void loadLibrary();
     }, []);
 
-    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            void loadLibrary({ silent: true });
+        }, hasActiveTasks ? 3000 : 15000);
 
-    const formatEta = (seconds) => {
-        if (!Number.isFinite(seconds) || seconds <= 0) return '';
-        if (seconds < 60) return `约剩余 ${seconds} 秒`;
-        const m = Math.floor(seconds / 60);
-        const s = seconds % 60;
-        if (m < 60) return `约剩余 ${m} 分 ${s} 秒`;
-        const h = Math.floor(m / 60);
-        const mm = m % 60;
-        return `约剩余 ${h} 小时 ${mm} 分`;
-    };
+        return () => window.clearInterval(timer);
+    }, [hasActiveTasks]);
 
-    const pollTaskUntilDone = async (taskId, { maxAttempts = 900, intervalMs = 1000, onProgress = null } = {}) => {
-        for (let i = 0; i < maxAttempts; i++) {
-            const res = await api.get(`/analyze/tasks/${taskId}`);
-            const status = res.data?.status;
-            if (onProgress) {
-                onProgress(res.data || {});
-            }
+    const filesWithTasks = useMemo(
+        () =>
+            files.map((file) => {
+                const activeTask = analysisTasks.find(
+                    (task) => task.file_id === file.id && ACTIVE_TASK_STATUSES.has(task.status),
+                );
+                const latestTask = analysisTasks.find((task) => task.file_id === file.id);
+                return {
+                    ...file,
+                    activeTask,
+                    latestTask,
+                };
+            }),
+        [analysisTasks, files],
+    );
 
-            if (status === 'completed') return res.data;
-            if (status === 'failed') {
-                throw new Error(res.data?.error_message || 'Analysis failed');
-            }
+    const stats = useMemo(() => {
+        const uploaded = files.length;
+        const analyzed = files.filter((file) => file.status === 'analyzed').length;
+        const waiting = files.filter((file) => file.status === 'uploaded').length;
+        const failed = files.filter((file) => file.status === 'error').length;
+        return { uploaded, analyzed, waiting, failed };
+    }, [files]);
 
-            await sleep(intervalMs);
+    const resetUploadDraft = () => {
+        setUploadDraft(emptyUploadState);
+        setShowUploadModal(false);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
         }
-        throw new Error('Analysis timeout');
     };
 
-    const handleFileSelect = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        setSelectedUploadFile(file);
-        // 默认设置为当前时间
-        const now = new Date();
-        const localISOTime = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-        setStartTime(localISOTime);
+    const openFilePicker = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileSelect = (event) => {
+        const file = event.target.files?.[0];
+        if (!file) {
+            return;
+        }
+        setUploadDraft({
+            file,
+            startTime: toLocalInputValue(new Date()),
+            autoAnalyze: true,
+        });
         setShowUploadModal(true);
     };
 
     const handleUpload = async () => {
-        if (!selectedUploadFile) return;
+        if (!uploadDraft.file) {
+            return;
+        }
 
         setUploading(true);
+        setLibraryError('');
+        setLibraryNotice('');
         setShowUploadModal(false);
+
         const formData = new FormData();
-        formData.append('file', selectedUploadFile);
-        if (startTime) {
-            formData.append('start_time', startTime);
+        formData.append('file', uploadDraft.file);
+        if (uploadDraft.startTime) {
+            formData.append('start_time', uploadDraft.startTime);
         }
 
         try {
-            await api.post('/files/upload', formData);
-            await fetchFiles();
+            const uploadResponse = await api.post('/files/upload', formData);
+            const createdFile = uploadResponse.data;
+
+            if (uploadDraft.autoAnalyze && createdFile?.id) {
+                await api.post(`/analyze/${createdFile.id}`);
+                setLibraryNotice(`${createdFile.filename} 已上传，并已加入分析队列。`);
+            } else {
+                setLibraryNotice(`${createdFile?.filename || '文件'} 上传成功。`);
+            }
+
+            await loadLibrary({ silent: true });
         } catch (error) {
-            console.error("Upload failed", error);
-            alert("Upload failed");
+            console.error('Upload failed', error);
+            setLibraryError(error?.response?.data?.detail || '上传失败。');
         } finally {
             setUploading(false);
-            setSelectedUploadFile(null);
-            setStartTime('');
-        }
-    };
-
-    const cancelUpload = () => {
-        setShowUploadModal(false);
-        setSelectedUploadFile(null);
-        setStartTime('');
-    };
-
-    const handleDelete = async (id, e) => {
-        e.stopPropagation();
-        if (!confirm("确定删除此文件吗？")) return;
-        try {
-            await api.delete(`/files/${id}`);
-            setFiles(files.filter(f => f.id !== id));
-        } catch (error) {
-            console.error("Delete failed", error);
-            alert("Delete failed");
+            resetUploadDraft();
         }
     };
 
     const handleAnalyze = async (file) => {
-        if (file.status === 'analyzed' || file.status === 'processing') return;
-
-        setProcessing(file.id);
-        setProgressByFile(prev => ({ ...prev, [file.id]: 0 }));
-        setFiles(prevFiles => prevFiles.map(f => f.id === file.id ? { ...f, status: 'processing' } : f));
+        setActionFileId(file.id);
+        setLibraryError('');
+        setLibraryNotice('');
         try {
-            const submitRes = await api.post(`/analyze/${file.id}`);
-            const taskId = submitRes.data?.task_id;
-            if (!taskId) {
-                throw new Error('Task creation failed');
-            }
-            await pollTaskUntilDone(taskId, {
-                onProgress: (taskData) => {
-                    const raw = Number(taskData?.progress_percent);
-                    const p = Number.isFinite(raw) ? Math.max(0, Math.min(100, Math.round(raw))) : 0;
-                    const rawEta = Number(taskData?.eta_seconds);
-                    const eta = Number.isFinite(rawEta) ? Math.max(0, Math.round(rawEta)) : null;
-                    setProgressByFile(prev => ({ ...prev, [file.id]: p }));
-                    setEtaByFile(prev => ({ ...prev, [file.id]: eta }));
-                },
-            });
-            await fetchFiles();
-        } catch (err) {
-            console.error("Analysis failed", err);
-            alert(err?.message || "Analysis failed");
-            await fetchFiles();
+            await api.post(`/analyze/${file.id}`);
+            setLibraryNotice(`${file.filename} 已加入分析队列。`);
+            await loadLibrary({ silent: true });
+        } catch (error) {
+            console.error('Analysis queue failed', error);
+            setLibraryError(error?.response?.data?.detail || '发起分析失败。');
         } finally {
-            setProcessing(null);
-            setProgressByFile(prev => {
-                const next = { ...prev };
-                delete next[file.id];
-                return next;
-            });
-            setEtaByFile(prev => {
-                const next = { ...prev };
-                delete next[file.id];
-                return next;
-            });
+            setActionFileId(null);
+        }
+    };
+
+    const handleDelete = async (file) => {
+        if (!window.confirm(`确定删除 ${file.filename} 吗？这会一并删除关联分析记录。`)) {
+            return;
+        }
+
+        setActionFileId(file.id);
+        setLibraryError('');
+        setLibraryNotice('');
+        try {
+            await api.delete(`/files/${file.id}`);
+            setLibraryNotice(`${file.filename} 已删除。`);
+            await loadLibrary({ silent: true });
+        } catch (error) {
+            console.error('Delete failed', error);
+            setLibraryError(error?.response?.data?.detail || '删除失败。');
+        } finally {
+            setActionFileId(null);
         }
     };
 
     return (
-        <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                <h1 style={{ fontSize: '1.8rem', margin: 0 }}>媒体文件库</h1>
-                <div>
-                    <input
-                        type="file"
-                        id="upload-input"
-                        style={{ display: 'none' }}
-                        onChange={handleFileSelect}
-                        accept="image/*,video/mp4"
-                    />
-                    <button
-                        className="btn-primary"
-                        onClick={() => document.getElementById('upload-input').click()}
-                        disabled={uploading}
-                    >
-                        {uploading ? <Loader2 className="animate-spin" size={20} /> : <Upload size={20} />}
-                        上传素材
+        <div className="page-shell">
+            <section className="page-header">
+                <div className="page-title-group">
+                    <span>文件</span>
+                    <h1>文件库</h1>
+                    <p>上传图片或视频，设置开始时间，并直接发起分析。</p>
+                </div>
+                <div className="page-header-actions">
+                    <button type="button" className="btn-primary" onClick={openFilePicker} disabled={uploading}>
+                        {uploading ? '上传中...' : '上传文件'}
+                    </button>
+                    <button type="button" className="btn-secondary" onClick={() => void loadLibrary()} disabled={loading}>
+                        刷新
                     </button>
                 </div>
-            </div>
+            </section>
 
-            {/* 上传时间设置模态框 */}
-            {showUploadModal && (
-                <div style={{
-                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                    background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-                }}>
-                    <div style={{ background: 'white', padding: '2rem', borderRadius: '1rem', width: '400px', maxWidth: '90%' }}>
-                        <h3 style={{ marginBottom: '1.5rem', fontSize: '1.2rem' }}>设置视频开始时间</h3>
-                        <p style={{ marginBottom: '1rem', color: '#64748b', fontSize: '0.9rem' }}>
-                            文件: {selectedUploadFile?.name}
-                        </p>
-                        <div style={{ marginBottom: '1.5rem' }}>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500, fontSize: '0.9rem' }}>
-                                <Calendar size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
-                                视频开始时间
-                            </label>
-                            <input
-                                type="datetime-local"
-                                value={startTime}
-                                onChange={(e) => setStartTime(e.target.value)}
-                                style={{ width: '100%', padding: '0.6rem', borderRadius: '0.5rem', border: '1px solid #cbd5e1' }}
-                            />
-                            <p style={{ marginTop: '0.5rem', color: '#94a3b8', fontSize: '0.8rem' }}>
-                                用于客流统计时计算真实时间点
-                            </p>
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,video/mp4,video/avi,video/x-msvideo"
+                style={{ display: 'none' }}
+                onChange={handleFileSelect}
+            />
+
+            {libraryError ? <div className="notice error">{libraryError}</div> : null}
+            {libraryNotice ? <div className="notice success">{libraryNotice}</div> : null}
+
+            <section className="stat-grid">
+                <div className="stat-card">
+                    <span className="stat-label">文件总数</span>
+                    <strong className="stat-value">{stats.uploaded}</strong>
+                    <p className="stat-hint">当前文件库中所有媒体文件。</p>
+                </div>
+                <div className="stat-card">
+                    <span className="stat-label">待分析</span>
+                    <strong className="stat-value">{stats.waiting}</strong>
+                    <p className="stat-hint">已上传但还未完成分析。</p>
+                </div>
+                <div className="stat-card">
+                    <span className="stat-label">已分析</span>
+                    <strong className="stat-value">{stats.analyzed}</strong>
+                    <p className="stat-hint">可以用于检索和客流分析。</p>
+                </div>
+                <div className="stat-card">
+                    <span className="stat-label">失败</span>
+                    <strong className="stat-value">{stats.failed}</strong>
+                    <p className="stat-hint">需要重新发起分析或检查数据。</p>
+                </div>
+            </section>
+
+            <section className="card">
+                <div className="card-header">
+                    <div>
+                        <h2 className="card-title">分析队列</h2>
+                        <p className="card-subtitle">查看排队中、分析中和最近的任务。</p>
+                    </div>
+                </div>
+                <div className="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>文件</th>
+                                <th>状态</th>
+                                <th>进度</th>
+                                <th>创建时间</th>
+                                <th>备注</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {analysisTasks.map((task) => (
+                                <tr key={task.task_id}>
+                                    <td>{task.filename || `文件 #${task.file_id}`}</td>
+                                    <td>{getTaskLabel(task.status)}</td>
+                                    <td>{Number.isFinite(task.progress_percent) ? `${task.progress_percent}%` : '--'}</td>
+                                    <td>{formatDateTime(task.created_at)}</td>
+                                    <td>{task.file_status || '--'}</td>
+                                </tr>
+                            ))}
+                            {!analysisTasks.length ? (
+                                <tr>
+                                    <td colSpan="5">
+                                        <div className="empty-state">当前没有分析任务。</div>
+                                    </td>
+                                </tr>
+                            ) : null}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section className="card">
+                <div className="card-header">
+                    <div>
+                        <h2 className="card-title">文件列表</h2>
+                        <p className="card-subtitle">管理上传文件，并在需要时跳转到检索或客流分析。</p>
+                    </div>
+                </div>
+
+                {loading ? <div className="empty-state">正在加载文件库...</div> : null}
+
+                {!loading ? (
+                    <div className="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>文件名</th>
+                                    <th>类型</th>
+                                    <th>大小</th>
+                                    <th>状态</th>
+                                    <th>开始时间</th>
+                                    <th>上传时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filesWithTasks.map((file) => {
+                                    const presentation = getFileStatus(file, file.activeTask);
+                                    const isBusy = actionFileId === file.id;
+
+                                    return (
+                                        <tr key={file.id}>
+                                            <td>
+                                                <div className="table-primary">{file.filename}</div>
+                                                <div className="table-secondary">{presentation.detail}</div>
+                                            </td>
+                                            <td>{getFileTypeLabel(file.file_type)}</td>
+                                            <td>{formatBytes(file.file_size)}</td>
+                                            <td>
+                                                <span className={`status-tag ${
+                                                    presentation.label === '已分析'
+                                                        ? 'is-success'
+                                                        : presentation.label === '失败'
+                                                          ? 'is-danger'
+                                                          : presentation.label === '已上传'
+                                                            ? 'is-warning'
+                                                            : 'is-info'
+                                                }`}>
+                                                    {presentation.label}
+                                                </span>
+                                            </td>
+                                            <td>{formatDateTime(file.start_time)}</td>
+                                            <td>{formatDateTime(file.upload_time)}</td>
+                                            <td>
+                                                <div className="table-actions">
+                                                    {file.status === 'analyzed' ? (
+                                                        <>
+                                                            <button
+                                                                type="button"
+                                                                className="btn-ghost"
+                                                                onClick={() => navigate('/retrieval', { state: { fileId: file.id } })}
+                                                            >
+                                                                去检索
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="btn-ghost"
+                                                                onClick={() => navigate('/traffic', { state: { fileId: file.id } })}
+                                                            >
+                                                                客流分析
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <button
+                                                            type="button"
+                                                            className="btn-ghost"
+                                                            onClick={() => handleAnalyze(file)}
+                                                            disabled={Boolean(file.activeTask) || isBusy}
+                                                        >
+                                                            {file.status === 'error' ? '重新分析' : '开始分析'}
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        className="btn-ghost danger"
+                                                        onClick={() => handleDelete(file)}
+                                                        disabled={isBusy || Boolean(file.activeTask)}
+                                                    >
+                                                        删除
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                                {!filesWithTasks.length ? (
+                                    <tr>
+                                        <td colSpan="7">
+                                            <div className="empty-state">文件库为空，请先上传文件。</div>
+                                        </td>
+                                    </tr>
+                                ) : null}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : null}
+            </section>
+
+            {showUploadModal ? (
+                <div className="modal-backdrop">
+                    <div className="modal">
+                        <div className="card-header">
+                            <div>
+                                <h2 className="card-title">上传文件</h2>
+                                <p className="card-subtitle">{uploadDraft.file?.name || '新文件'}</p>
+                            </div>
                         </div>
-                        <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-                            <button
-                                onClick={cancelUpload}
-                                style={{ padding: '0.5rem 1rem', border: '1px solid #cbd5e1', borderRadius: '0.5rem', background: 'white', cursor: 'pointer' }}
-                            >
+
+                        <div className="field-grid one">
+                            <label className="field">
+                                <span>源视频开始时间</span>
+                                <input
+                                    type="datetime-local"
+                                    value={uploadDraft.startTime}
+                                    onChange={(event) =>
+                                        setUploadDraft((current) => ({ ...current, startTime: event.target.value }))
+                                    }
+                                />
+                            </label>
+
+                            <label className="checkbox-field">
+                                <input
+                                    type="checkbox"
+                                    checked={uploadDraft.autoAnalyze}
+                                    onChange={(event) =>
+                                        setUploadDraft((current) => ({ ...current, autoAnalyze: event.target.checked }))
+                                    }
+                                />
+                                <span>上传后立即分析</span>
+                            </label>
+                        </div>
+
+                        <div className="modal-actions">
+                            <button type="button" className="btn-secondary" onClick={resetUploadDraft}>
                                 取消
                             </button>
-                            <button
-                                className="btn-primary"
-                                onClick={handleUpload}
-                            >
+                            <button type="button" className="btn-primary" onClick={handleUpload}>
                                 上传
                             </button>
                         </div>
                     </div>
                 </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem' }}>
-                {files.map((file) => {
-                    const mediaSrc = apiUrl(`/uploads/${encodeURIComponent(file.filename)}`);
-                    const progress = Number.isFinite(progressByFile[file.id]) ? progressByFile[file.id] : 0;
-                    const etaText = formatEta(etaByFile[file.id]);
-
-                    return (
-                        <div key={file.id} className="stat-card" style={{ padding: '0', overflow: 'hidden', position: 'relative' }}>
-                            <div style={{
-                                height: '160px',
-                                background: '#f8fafc',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                borderBottom: '1px solid #e2e8f0',
-                                position: 'relative',
-                                overflow: 'hidden'
-                            }}>
-                                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 0 }}>
-                                    {file.file_type === 'video' ? <FileVideo size={48} color="#94a3b8" /> : <FileImage size={48} color="#94a3b8" />}
-                                </div>
-                                {file.file_type === 'video' ? (
-                                    <video
-                                        src={mediaSrc}
-                                        muted
-                                        playsInline
-                                        preload="metadata"
-                                        onLoadedMetadata={(e) => {
-                                            if (e.currentTarget.duration) {
-                                                e.currentTarget.currentTime = Math.min(0.1, e.currentTarget.duration / 2);
-                                            }
-                                        }}
-                                        style={{ width: '100%', height: '100%', objectFit: 'cover', zIndex: 1 }}
-                                    />
-                                ) : (
-                                    <img
-                                        src={mediaSrc}
-                                        alt={file.filename}
-                                        loading="lazy"
-                                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                        style={{ width: '100%', height: '100%', objectFit: 'cover', zIndex: 1 }}
-                                    />
-                                )}
-                            </div>
-
-                            <div style={{ padding: '1rem' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.5rem' }}>
-                                    <h3 style={{ margin: 0, fontSize: '1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }} title={file.filename}>
-                                        {file.filename}
-                                    </h3>
-                                    <button onClick={(e) => handleDelete(file.id, e)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#ef4444' }}>
-                                        <Trash2 size={16} />
-                                    </button>
-                                </div>
-
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem' }}>
-                                    <div>
-                                        {file.status === 'analyzed' ? (
-                                            <span className="badge" style={{ background: '#dcfce7', color: '#166534', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                <CheckCircle size={12} /> 已分析
-                                            </span>
-                                        ) : (file.status === 'processing' || processing === file.id) ? (
-                                            <div style={{ minWidth: '120px' }}>
-                                                <span className="badge" style={{ background: '#eff6ff', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                    <Loader2 size={12} className="animate-spin" /> 分析中 {progress}%
-                                                </span>
-                                                <div style={{ marginTop: '6px', width: '100%', height: '4px', background: '#dbeafe', borderRadius: '999px', overflow: 'hidden' }}>
-                                                    <div style={{ width: `${progress}%`, height: '100%', background: '#2563eb', transition: 'width 0.2s linear' }} />
-                                                </div>
-                                                {etaText ? (
-                                                    <div style={{ marginTop: '4px', fontSize: '0.72rem', color: '#475569' }}>{etaText}</div>
-                                                ) : null}
-                                            </div>
-                                        ) : file.status === 'error' ? (
-                                            <span className="badge" style={{ background: '#fee2e2', color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                <AlertCircle size={12} /> 失败
-                                            </span>
-                                        ) : (
-                                            <button
-                                                onClick={() => handleAnalyze(file)}
-                                                style={{ fontSize: '0.8rem', color: '#2563eb', background: 'none', border: '1px solid #2563eb', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}
-                                            >
-                                                点击分析
-                                            </button>
-                                        )}
-                                    </div>
-
-                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                        <button
-                                            title="去检索"
-                                            disabled={file.status !== 'analyzed'}
-                                            onClick={() => navigate('/retrieval', { state: { fileId: file.id } })}
-                                            style={{ border: 'none', background: 'transparent', cursor: 'pointer', opacity: file.status === 'analyzed' ? 1 : 0.3 }}
-                                        >
-                                            <Search size={20} color="#64748b" />
-                                        </button>
-                                        <button
-                                            title="查看客流"
-                                            disabled={file.status !== 'analyzed'}
-                                            onClick={() => navigate('/traffic', { state: { fileId: file.id } })}
-                                            style={{ border: 'none', background: 'transparent', cursor: 'pointer', opacity: file.status === 'analyzed' ? 1 : 0.3 }}
-                                        >
-                                            <BarChart2 size={20} color="#64748b" />
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    );
-                })}
-
-                {files.length === 0 && (
-                    <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '4rem', color: '#94a3b8', border: '2px dashed #cbd5e1', borderRadius: '1rem' }}>
-                        暂无文件，请上传
-                    </div>
-                )}
-            </div>
+            ) : null}
         </div>
     );
-};
+}
 
 export default FileLibrary;

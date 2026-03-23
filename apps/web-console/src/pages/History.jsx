@@ -1,16 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FileText, RefreshCw, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 
-const badgeStyle = (background, color) => ({
-    padding: '0.2rem 0.6rem',
-    borderRadius: '999px',
-    background,
-    color,
-    fontWeight: 600,
-});
-
-const History = () => {
+function History() {
     const [records, setRecords] = useState([]);
     const [selectedId, setSelectedId] = useState(null);
     const [report, setReport] = useState(null);
@@ -21,18 +12,18 @@ const History = () => {
     const fetchHistory = useCallback(async () => {
         try {
             const response = await api.get('/history');
-            setRecords(response.data);
+            setRecords(response.data || []);
         } catch (error) {
             console.error('Failed to fetch history', error);
         }
     }, []);
 
     useEffect(() => {
-        fetchHistory();
+        void fetchHistory();
     }, [fetchHistory]);
 
     const handleDelete = async (id) => {
-        if (!confirm('Delete this analysis record?')) {
+        if (!window.confirm('确定删除这条分析记录吗？')) {
             return;
         }
         try {
@@ -45,153 +36,153 @@ const History = () => {
             }
         } catch (error) {
             console.error('Failed to delete record', error);
-            alert('Delete failed.');
+            window.alert('删除失败。');
         }
     };
 
-    const fetchReport = useCallback(async (id, { refresh = false } = {}) => {
-        setSelectedId(id);
-        setReport(null);
-        setReportError('');
-        setReportLoading(true);
-        try {
-            const url = `/history/${id}/report?use_llm=${useLLM ? 1 : 0}&refresh=${refresh ? 1 : 0}`;
-            const response = await api.get(url);
-            setReport(response.data);
-        } catch (error) {
-            console.error('Failed to fetch report', error);
-            setReportError('Failed to load the analysis report.');
-        } finally {
-            setReportLoading(false);
-        }
-    }, [useLLM]);
+    const fetchReport = useCallback(
+        async (id, { refresh = false } = {}) => {
+            setSelectedId(id);
+            setReport(null);
+            setReportError('');
+            setReportLoading(true);
+            try {
+                const response = await api.get(`/history/${id}/report?use_llm=${useLLM ? 1 : 0}&refresh=${refresh ? 1 : 0}`);
+                setReport(response.data);
+            } catch (error) {
+                console.error('Failed to fetch report', error);
+                setReportError('报告加载失败。');
+            } finally {
+                setReportLoading(false);
+            }
+        },
+        [useLLM],
+    );
 
     return (
-        <div>
-            <h1 style={{ fontSize: '1.8rem', marginBottom: '2rem' }}>Analysis History</h1>
-
-            <div
-                className="stat-card"
-                style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}
-            >
-                <div style={{ color: '#475569' }}>
-                    Pick a completed analysis to inspect its stored report or regenerate it on demand.
+        <div className="page-shell">
+            <section className="page-header">
+                <div className="page-title-group">
+                    <span>历史</span>
+                    <h1>分析记录</h1>
+                    <p>查看已完成的分析记录，并按需重新生成报告。</p>
                 </div>
-                <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', userSelect: 'none', color: '#334155' }}>
-                    <input type="checkbox" checked={useLLM} onChange={(event) => setUseLLM(event.target.checked)} />
-                    Use LLM when available
-                </label>
-            </div>
+                <div className="page-header-actions">
+                    <label className="checkbox-field">
+                        <input type="checkbox" checked={useLLM} onChange={(event) => setUseLLM(event.target.checked)} />
+                        <span>生成报告时使用模型</span>
+                    </label>
+                </div>
+            </section>
 
-            <div className="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>File name</th>
-                            <th>Uploaded at</th>
-                            <th>Pedestrians</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {records.map((record) => (
-                            <tr key={record.id}>
-                                <td>#{record.id}</td>
-                                <td>{record.filename}</td>
-                                <td>{new Date(record.upload_time).toLocaleString()}</td>
-                                <td>
-                                    <strong>{record.pedestrian_count}</strong>
-                                </td>
-                                <td>
-                                    <span style={badgeStyle('#dcfce7', '#166534')}>Completed</span>
-                                </td>
-                                <td style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                                    <button
-                                        onClick={() => fetchReport(record.id)}
-                                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#2563eb' }}
-                                        title="Open report"
-                                    >
-                                        <FileText size={16} />
-                                    </button>
-                                    <button
-                                        onClick={() => handleDelete(record.id)}
-                                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#ef4444' }}
-                                        title="Delete record"
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
-                        {!records.length ? (
+            <section className="card">
+                <div className="card-header">
+                    <div>
+                        <h2 className="card-title">记录列表</h2>
+                        <p className="card-subtitle">点击查看报告，或删除不再需要的历史数据。</p>
+                    </div>
+                </div>
+
+                <div className="table-wrap">
+                    <table>
+                        <thead>
                             <tr>
-                                <td colSpan="6" style={{ textAlign: 'center', padding: '3rem', color: '#94a3b8' }}>
-                                    No history records yet.
-                                </td>
+                                <th>ID</th>
+                                <th>文件名</th>
+                                <th>上传时间</th>
+                                <th>行人数</th>
+                                <th>状态</th>
+                                <th>操作</th>
                             </tr>
-                        ) : null}
-                    </tbody>
-                </table>
-            </div>
+                        </thead>
+                        <tbody>
+                            {records.map((record) => (
+                                <tr key={record.id}>
+                                    <td>#{record.id}</td>
+                                    <td>{record.filename}</td>
+                                    <td>{new Date(record.upload_time).toLocaleString('zh-CN')}</td>
+                                    <td>{record.pedestrian_count}</td>
+                                    <td>
+                                        <span className="status-tag is-success">已完成</span>
+                                    </td>
+                                    <td>
+                                        <div className="table-actions">
+                                            <button type="button" className="btn-ghost" onClick={() => fetchReport(record.id)}>
+                                                查看报告
+                                            </button>
+                                            <button type="button" className="btn-ghost danger" onClick={() => handleDelete(record.id)}>
+                                                删除
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                            {!records.length ? (
+                                <tr>
+                                    <td colSpan="6">
+                                        <div className="empty-state">暂无历史记录。</div>
+                                    </td>
+                                </tr>
+                            ) : null}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
 
             {selectedId ? (
-                <div className="stat-card" style={{ marginTop: '1.5rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                        <h3 style={{ margin: 0 }}>Report for record #{selectedId}</h3>
-                        <button
-                            className="btn-primary"
-                            onClick={() => fetchReport(selectedId, { refresh: true })}
-                            disabled={reportLoading}
-                            style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
-                        >
-                            <RefreshCw size={16} />
-                            Regenerate
+                <section className="card">
+                    <div className="card-header">
+                        <div>
+                            <h2 className="card-title">记录 #{selectedId} 的报告</h2>
+                            <p className="card-subtitle">查看摘要、重点发现和建议。</p>
+                        </div>
+                        <button type="button" className="btn-primary" onClick={() => fetchReport(selectedId, { refresh: true })} disabled={reportLoading}>
+                            {reportLoading ? '生成中...' : '重新生成'}
                         </button>
                     </div>
 
-                    {reportLoading ? <div style={{ marginTop: '1rem', color: '#94a3b8' }}>Generating report...</div> : null}
-                    {reportError ? <div style={{ marginTop: '1rem', color: '#991b1b' }}>{reportError}</div> : null}
+                    {reportLoading ? <div className="empty-state">正在生成报告...</div> : null}
+                    {reportError ? <div className="notice error">{reportError}</div> : null}
 
                     {!reportLoading && !reportError && report ? (
-                        <div style={{ marginTop: '1rem', lineHeight: 1.8, color: '#0f172a' }}>
-                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-                                <span style={badgeStyle('#eef2ff', '#3730a3')}>{report.llm_used ? 'LLM' : 'Rule-based'}</span>
-                                <span style={badgeStyle(report.cached ? '#ecfeff' : '#f1f5f9', '#0f172a')}>
-                                    {report.cached ? 'Cached' : 'Fresh'}
-                                </span>
+                        <>
+                            <div className="action-row">
+                                <span className="status-tag is-info">{report.llm_used ? '模型生成' : '规则生成'}</span>
+                                <span className="status-tag is-warning">{report.cached ? '缓存结果' : '实时生成'}</span>
                             </div>
 
-                            <div style={{ marginBottom: '0.75rem' }}>
-                                <div style={{ color: '#334155', fontSize: '0.9rem' }}>Summary</div>
-                                <div>{report.report?.summary || 'No summary available.'}</div>
-                            </div>
-
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-                                <div>
-                                    <div style={{ color: '#334155', fontSize: '0.9rem' }}>Key findings</div>
-                                    <ul style={{ margin: 0, paddingLeft: '1.2rem' }}>
-                                        {(report.report?.key_findings || []).length
-                                            ? report.report.key_findings.map((item, index) => <li key={index}>{item}</li>)
-                                            : <li>No findings available.</li>}
+                            <div className="page-grid-2 inner-grid">
+                                <div className="card subtle-card">
+                                    <h3>摘要</h3>
+                                    <p className="prose-block">{report.report?.summary || '暂无摘要。'}</p>
+                                </div>
+                                <div className="card subtle-card">
+                                    <h3>重点发现</h3>
+                                    <ul className="simple-list">
+                                        {(report.report?.key_findings || []).length ? (
+                                            report.report.key_findings.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)
+                                        ) : (
+                                            <li>暂无重点发现。</li>
+                                        )}
                                     </ul>
                                 </div>
-                                <div>
-                                    <div style={{ color: '#334155', fontSize: '0.9rem' }}>Recommendations</div>
-                                    <ul style={{ margin: 0, paddingLeft: '1.2rem' }}>
-                                        {(report.report?.recommendations || []).length
-                                            ? report.report.recommendations.map((item, index) => <li key={index}>{item}</li>)
-                                            : <li>No recommendations available.</li>}
+                                <div className="card subtle-card">
+                                    <h3>建议</h3>
+                                    <ul className="simple-list">
+                                        {(report.report?.recommendations || []).length ? (
+                                            report.report.recommendations.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)
+                                        ) : (
+                                            <li>暂无建议。</li>
+                                        )}
                                     </ul>
                                 </div>
                             </div>
-                        </div>
+                        </>
                     ) : null}
-                </div>
+                </section>
             ) : null}
         </div>
     );
-};
+}
 
 export default History;

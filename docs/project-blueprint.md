@@ -1,85 +1,64 @@
 # Urban Insight 项目蓝图
 
-## 1. 蓝图结论
+## 1. 当前蓝图结论
 
-这个项目现在的推荐形态是：
+当前项目的推荐形态不是“所有东西都继续拆细”，而是下面这套更稳定的结构：
 
-- 前端独立：`apps/web-console`
-- 业务后端微服务：`auth / media / analysis / search / insight`
-- 一个统一的常驻 Agent：`agent-service`
-- 基础设施：`PostgreSQL + Docker Compose + Nginx`
+- 前端客户端：`apps/web-console`
+- 业务服务：`auth-service / media-service / analysis-service / search-service / insight-service`
+- 常驻自主 Agent：`agent-service`
+- 基础设施：`PostgreSQL + Nginx + Docker Compose`
 - 契约层：`contracts/http + contracts/events`
 
-也就是说，整体是“业务微服务 + 单体常驻 agent”的混合结构，而不是“所有东西都拆成很多微服务”。
+这是一套“轻量微服务 + 单一常驻 Agent”的混合架构。对当前阶段更合理：
 
-这比之前更适合当前阶段：
+- 部署链路短
+- 服务边界清晰
+- 24x7 Agent 更容易稳定运行
+- 后续仍然可以继续拆分，而不是被当前结构锁死
 
-- 部署更简单
-- 运行链路更短
-- 24x7 agent 更容易稳定
-- 后续仍然可以继续拆分
+## 2. 目录与边界
 
-## 2. 参考方向
+```text
+.
+├── apps/
+│   └── web-console/
+├── services/
+│   ├── auth_service/
+│   ├── media_service/
+│   ├── analysis_service/
+│   ├── search_service/
+│   └── insight_service/
+├── agents/
+│   └── agent_service/
+├── agent/                 # agent 内部共享实现
+├── backend/               # 业务共享实现
+├── contracts/
+│   ├── http/
+│   └── events/
+├── deploy/
+│   ├── compose/
+│   ├── docker/
+│   └── nginx/
+├── docs/
+└── scripts/
+```
 
-Agent 蓝图已经改为参考 `reference/picoclaw`，而不再参考之前那个错误仓库。
+边界定义：
 
-我们借鉴的是它的这些特点：
+- `apps/` 放用户可见客户端
+- `services/` 放可独立部署的业务服务入口
+- `agents/` 放可独立部署的 Agent 服务入口
+- `agent/` 与 `backend/` 暂时保留为共享实现层
+- `contracts/` 固化跨服务 HTTP 与事件契约
+- `deploy/` 固化 Docker、Compose、Nginx 与环境模板
 
-- 一个常驻 agent 进程
-- 清晰的 session / run / memory 模型
-- 文件式 workspace 和记忆
-- 定时任务是运行时的一部分
-- 工具注册要克制
-
-## 3. 系统分层
-
-### 前端层
-
-- `apps/web-console`
-  - React + Vite
-  - 通过 `/api` 调后端和 agent
-
-### 业务服务层
-
-- `auth-service`
-- `media-service`
-- `analysis-service`
-- `search-service`
-- `insight-service`
-
-这些服务负责真正的安防业务能力。
-
-### Agent 层
-
-- `agent-service`
-
-它负责：
-
-- 邮件入口
-- 巡检调度
-- 会话和任务控制
-- 调用业务服务
-- 记忆落盘
-- 结果回邮
-
-### 基础设施层
-
-- `postgres`
-- `nginx`
-- Docker volumes
-
-### 契约层
-
-- `contracts/http/*.openapi.json`
-- `contracts/http/gateway-routing-contract.md`
-- `contracts/events/*.md`
-
-## 4. 部署蓝图
+## 3. 运行时蓝图
 
 ```mermaid
 flowchart TB
-    Browser["Web Frontend"] --> Gateway["Nginx"]
-    Manager["Manager Email"] --> Agent["agent-service"]
+    Browser["浏览器 / Web Console"] --> Gateway["gateway (Nginx)"]
+    Manager["管理员 (Email / Web)"] --> Agent["agent-service"]
     Gateway --> Auth["auth-service"]
     Gateway --> Media["media-service"]
     Gateway --> Analysis["analysis-service"]
@@ -97,33 +76,73 @@ flowchart TB
     Search --> PG
     Insight --> PG
     Agent --> PG
-    Agent --> Workspace["agent workspace"]
+    Agent --> Workspace["agent workspace / memory"]
 ```
 
-## 5. 当前已经完成的部分
+## 4. 业务服务层
 
-### 业务层
+当前业务服务仍然保持轻量边界：
 
-- 前后端分离
-- 五个业务微服务入口
-- 统一网关和容器部署
+- `auth-service`
+  - 用户认证与权限基础能力
+- `media-service`
+  - 文件上传、媒体元数据、媒体内容入口
+- `analysis-service`
+  - 分析任务与分析结果
+- `search-service`
+  - 结构化检索、自然语言检索、以图搜人
+- `insight-service`
+  - 洞察、摘要、统计问答
 
-### Agent 层
+这些服务通过 `gateway` 暴露到前端，同时也作为 `agent-service` 的受控工具后端。
 
-- `session / message / run / scheduled_task / approval / delivery` 数据模型
-- 统一 `agent-service`
-- control plane API
-- runtime claim/lease
-- executor API
-- email connector
-- scheduler
-- 文件式 memory
-- 首批巡检模板
-- OpenAPI 契约导出
+## 5. Agent 平台层
 
-## 6. 当前默认推荐部署
+当前推荐继续保持单一 `agent-service`，而不是立刻拆成更多 Agent 子服务。
 
-默认推荐部署这些服务：
+`agent-service` 内部已经包含：
+
+- `control_plane`
+  - `session / message / run / goal / scheduled_task / approval / alert / subscription`
+- `runtime_manager`
+  - claim、lease、heartbeat、执行状态回写
+- `executor`
+  - 受控工具执行与 tool loop
+- `scheduler`
+  - 巡检派发、goal sweep、memory boost、proactive generation
+- `connector_email`
+  - 邮件入站、ACK、结果回邮、告警通知
+- `memory_store`
+  - `MEMORY.md` 与 daily notes
+
+当前 Agent 已具备：
+
+- 短期状态
+- 长期记忆
+- goal lifecycle
+- proactive goal
+- strategy-aware execution
+- strategy feedback
+- feedback-aware rescheduling
+
+## 6. 契约层
+
+契约已经固化为仓库资产，而不是只存在代码里。
+
+- HTTP 契约：`contracts/http/*.openapi.json`
+- 事件契约：`contracts/events/*.md`
+- 契约导出脚本：`scripts/export_openapi_contracts.py`
+- 契约与结构守卫：`scripts/validate_repo.py`
+
+要求：
+
+- 服务间同步调用统一走 `HTTP + JSON`
+- 所有对外 API 都应能导出 OpenAPI
+- 事件命名与 payload 需要逐步固化，避免运行时临时拼接
+
+## 7. 部署蓝图
+
+当前标准部署集合：
 
 - `gateway`
 - `auth-service`
@@ -134,38 +153,43 @@ flowchart TB
 - `agent-service`
 - `postgres`
 
-不再默认要求把 agent 拆成 5 个单独容器。
+当前不默认引入：
 
-## 7. 后续路线
+- Redis
+- MQ
+- MinIO
+- Prometheus / Grafana / Loki
 
-### 第一阶段
+这些保留为后续增强项，不在当前默认部署路径里强制启用。
 
-- 首批巡检模板已经可用
-- 当前模板包括：
-  - analysis backlog patrol
-  - analysis failure patrol
-  - approval timeout patrol
+## 8. 推荐落地顺序
 
-### 第二阶段
+当前最合理的工程顺序不是继续拆服务，而是按下面的顺序推进：
 
-- 加入基础 alert / subscription
-- 让 agent 能主动告警
+1. 固化当前单一 `agent-service` 的稳定性与验证链
+2. 继续完善前端控制台与业务页面
+3. 完成真实服务器联调、邮件链路、域名与 TLS
+4. 在有明确负载或可靠性需求时，再引入 Redis / MQ / Object Storage
+5. 只有在职责与吞吐真正成为瓶颈时，再拆 Agent 子服务
 
-### 第三阶段
+## 9. 当前判断
 
-- 加入 incident 聚合和处置状态
-- 形成真正的安防运维闭环
+当前项目架构是合理的，原因是：
 
-### 第四阶段
+- 没有过早拆分
+- 业务边界清晰
+- Agent 自主能力集中，不依赖前端在线
+- 契约、部署、验证链已经成体系
 
-- 根据压力决定是否再次拆分 agent 子模块
+当前不建议做的事情：
 
-## 8. 架构原则
+- 再次引入旧的 `microservices/*` 外壳
+- 为了“更像企业级”而过度拆分 Agent
+- 在没有真实需求前强行接入更多基础设施
 
-后续实现时遵守 4 条原则：
+## 10. 关联文档
 
-1. 能在 `agent-service` 内解决的问题，先不要拆服务。
-2. 能做成受控工具的能力，先不要做成过度自治 agent。
-3. 能做成文件式记忆的内容，先不要上复杂记忆平台。
-4. 先做稳定巡检闭环，再做更高级的智能化。
-5. 已退出主蓝图的 legacy 入口要及时清理，避免双轨结构回潮。
+- `docs/enterprise-refactor-blueprint.md`
+- `docs/agent-ops-design.md`
+- `docs/agent-autonomy-phase14.md`
+- `deploy/README.md`

@@ -3,14 +3,14 @@ import { RadioTower, Settings } from 'lucide-react';
 import Sidebar from './Sidebar';
 
 const pageMeta = [
-    { match: /^\/$/, title: 'Client Workspace', subtitle: 'A single operational surface for evidence, analysis, and automation.' },
-    { match: /^\/files/, title: 'Evidence Library', subtitle: 'Manage uploaded media and prepare new material for analysis.' },
-    { match: /^\/retrieval/, title: 'Smart Retrieval', subtitle: 'Find people, events, and matches across processed material.' },
-    { match: /^\/traffic/, title: 'Flow Analytics', subtitle: 'Review movement volume, peaks, and temporal changes.' },
-    { match: /^\/insights/, title: 'Insight Briefs', subtitle: 'Read generated summaries, alerts, and analysis commentary.' },
-    { match: /^\/agent/, title: 'Agent Center', subtitle: 'Assign tasks, inspect runtime state, and follow agent activity.' },
-    { match: /^\/history/, title: 'Operations Log', subtitle: 'Trace execution history, sessions, and operational changes.' },
-    { match: /^\/settings/, title: 'Platform Settings', subtitle: 'Control credentials, integrations, and access preferences.' },
+    { match: /^\/$/, title: '工作台', subtitle: '查看系统概况、今日简报和运行状态。' },
+    { match: /^\/files/, title: '文件库', subtitle: '上传媒体、发起分析、管理文件。' },
+    { match: /^\/retrieval/, title: '检索', subtitle: '按条件、自然语言或图片查找目标。' },
+    { match: /^\/traffic/, title: '客流分析', subtitle: '查看时段趋势和人群结构。' },
+    { match: /^\/insights/, title: '洞察简报', subtitle: '生成摘要并继续提问。' },
+    { match: /^\/agent/, title: '智能体', subtitle: '对话、查看运行状态、处理审批和巡检。' },
+    { match: /^\/history/, title: '历史记录', subtitle: '回看分析记录和报告。' },
+    { match: /^\/settings/, title: '系统设置', subtitle: '管理账号、模型和平台配置。' },
 ];
 
 function getPageMeta(pathname) {
@@ -28,31 +28,34 @@ const MainLayout = ({ user }) => {
         <div className="layout-container">
             <Sidebar />
             <div className="main-content">
-                <header className="top-header client-header">
-                    <div>
-                        <div className="client-header-eyebrow">{isIpMode ? 'IP test session' : 'Domain session'}</div>
-                        <h2 className="client-header-title">{title}</h2>
-                        <p className="client-header-subtitle">{subtitle}</p>
+                <header className="top-header">
+                    <div className="page-title-group">
+                        <span>{isIpMode ? 'IP 测试访问' : '域名访问'}</span>
+                        <h1>{title}</h1>
+                        <p>{subtitle}</p>
                     </div>
 
-                    <div className="client-header-actions">
-                        <div className="client-connection-chip">
+                    <div className="top-header-meta">
+                        <div className="session-badge">
                             <RadioTower size={16} />
-                            <span>{hostname}</span>
+                            <div>
+                                <strong>{hostname}</strong>
+                                <span>{isIpMode ? '当前通过服务器 IP 访问' : '当前通过正式域名访问'}</span>
+                            </div>
                         </div>
 
                         <button
                             type="button"
-                            className="client-user-button"
+                            className="user-chip"
                             onClick={() => navigate('/settings')}
-                            title="Open settings"
+                            title="打开设置"
                         >
-                            <div className="client-user-avatar">{user?.username?.charAt(0).toUpperCase() || 'U'}</div>
-                            <div className="client-user-text">
-                                <strong>{user?.username || 'User'}</strong>
-                                <span>Workspace profile</span>
+                            <div className="user-avatar">{user?.username?.charAt(0).toUpperCase() || 'U'}</div>
+                            <div>
+                                <strong>{user?.username || '用户'}</strong>
+                                <span>{user?.role === 'admin' ? '管理员' : '普通用户'}</span>
                             </div>
-                            <Settings size={16} color="#64748b" />
+                            <Settings size={16} />
                         </button>
                     </div>
                 </header>

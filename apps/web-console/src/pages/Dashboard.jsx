@@ -1,107 +1,61 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-    Activity,
-    ArrowRight,
-    Bot,
-    Clock3,
-    FolderOpen,
-    Search,
-    ShieldCheck,
-    Sparkles,
-    TrafficCone,
-    UserRound,
-} from 'lucide-react';
+import { Activity, Bot, FolderOpen, Search, ShieldCheck, Sparkles, TrafficCone } from 'lucide-react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { agentApi, api } from '../lib/api';
 
-const formatDateTime = (value) => {
+function formatDateTime(value) {
     if (!value) {
-        return 'Not available';
+        return '--';
     }
     try {
-        return new Date(value).toLocaleString([], {
-            month: 'short',
-            day: 'numeric',
+        return new Date(value).toLocaleString('zh-CN', {
+            month: '2-digit',
+            day: '2-digit',
             hour: '2-digit',
             minute: '2-digit',
         });
     } catch {
         return value;
     }
-};
+}
 
-const metricCards = (stats, overview) => [
-    {
-        label: 'Analyses today',
-        value: stats.total_analyses ?? 0,
-        detail: 'Current day processing volume',
-        icon: Activity,
-        tone: 'blue',
-    },
-    {
-        label: 'Recognized pedestrians',
-        value: stats.total_pedestrians ?? 0,
-        detail: 'Structured detections in the dataset',
-        icon: UserRound,
-        tone: 'emerald',
-    },
-    {
-        label: 'Active agent runs',
-        value: overview?.counts?.active_runs ?? 0,
-        detail: 'Live automation in progress',
-        icon: Bot,
-        tone: 'amber',
-    },
-    {
-        label: 'Pending approvals',
-        value: overview?.counts?.pending_approvals ?? 0,
-        detail: 'Human review items waiting',
-        icon: ShieldCheck,
-        tone: 'rose',
-    },
-];
+function translateLoopHealth(value) {
+    const mapping = {
+        healthy: '正常',
+        degraded: '降级',
+        failed: '异常',
+    };
+    return mapping[value] || value || '--';
+}
 
-const quickActions = [
-    {
-        title: 'Upload evidence',
-        description: 'Bring new videos or images into the library and start analysis.',
-        icon: FolderOpen,
-        to: '/files',
-        tone: 'blue',
-    },
-    {
-        title: 'Search people',
-        description: 'Run structured or natural-language retrieval across processed results.',
-        icon: Search,
-        to: '/retrieval',
-        tone: 'teal',
-    },
-    {
-        title: 'Traffic analytics',
-        description: 'Inspect pedestrian volume changes and movement patterns.',
-        icon: TrafficCone,
-        to: '/traffic',
-        tone: 'amber',
-    },
-    {
-        title: 'Talk to agent',
-        description: 'Assign a task, review its status, and inspect live operational context.',
-        icon: Bot,
-        to: '/agent',
-        tone: 'violet',
-    },
-];
+function translateLoopName(value) {
+    const mapping = {
+        runtime: '运行循环',
+        scheduler: '调度循环',
+        email: '邮件循环',
+    };
+    return mapping[value] || value || '--';
+}
 
-const toneClassMap = {
-    blue: 'is-blue',
-    emerald: 'is-emerald',
-    amber: 'is-amber',
-    rose: 'is-rose',
-    teal: 'is-teal',
-    violet: 'is-violet',
-    slate: 'is-slate',
-};
+function translateGenderLabel(value) {
+    const mapping = {
+        Male: '男',
+        Female: '女',
+    };
+    return mapping[value] || value || '--';
+}
+
+function translateAgeLabel(value) {
+    const mapping = {
+        Child: '儿童',
+        Teen: '青少年',
+        Young: '青年',
+        Adult: '成人',
+        Old: '老年',
+    };
+    return mapping[value] || value || '--';
+}
 
 function Dashboard() {
     const navigate = useNavigate();
@@ -117,405 +71,285 @@ function Dashboard() {
         storage_used: '0 B',
     });
     const [brief, setBrief] = useState(null);
-    const [briefLoading, setBriefLoading] = useState(false);
-    const [briefError, setBriefError] = useState('');
     const [overview, setOverview] = useState(null);
     const [runtime, setRuntime] = useState(null);
-    const [systemError, setSystemError] = useState('');
+    const [error, setError] = useState('');
 
     useEffect(() => {
         let active = true;
 
-        const loadDashboard = async () => {
+        const loadPage = async () => {
             try {
-                const statsUrl = selectedDate ? `/stats?date=${selectedDate}` : '/stats';
-                const response = await api.get(statsUrl);
-                if (active) {
-                    setStats(response.data);
-                }
-            } catch (error) {
-                console.error('Failed to fetch dashboard stats', error);
-            }
-        };
-
-        void loadDashboard();
-        return () => {
-            active = false;
-        };
-    }, [selectedDate]);
-
-    useEffect(() => {
-        let active = true;
-
-        const loadBrief = async () => {
-            setBriefLoading(true);
-            setBriefError('');
-            try {
-                const response = await api.get(`/insights/brief?date=${selectedDate}&use_llm=${useLLM ? 1 : 0}&cache=1`);
-                if (active) {
-                    setBrief(response.data);
-                }
-            } catch (error) {
-                console.error('Failed to fetch daily brief', error);
-                if (active) {
-                    setBriefError('Daily brief is temporarily unavailable.');
-                }
-            } finally {
-                if (active) {
-                    setBriefLoading(false);
-                }
-            }
-        };
-
-        void loadBrief();
-        return () => {
-            active = false;
-        };
-    }, [selectedDate, useLLM]);
-
-    useEffect(() => {
-        let active = true;
-
-        const loadSystemState = async () => {
-            try {
-                const [nextOverview, nextRuntime] = await Promise.all([agentApi.overview(), agentApi.runtimeStatus()]);
+                const [statsResponse, briefResponse, nextOverview, nextRuntime] = await Promise.all([
+                    api.get(selectedDate ? `/stats?date=${selectedDate}` : '/stats'),
+                    api.get(`/insights/brief?date=${selectedDate}&use_llm=${useLLM ? 1 : 0}&cache=1`),
+                    agentApi.overview(),
+                    agentApi.runtimeStatus(),
+                ]);
                 if (!active) {
                     return;
                 }
+                setStats(statsResponse.data);
+                setBrief(briefResponse.data);
                 setOverview(nextOverview);
                 setRuntime(nextRuntime);
-                setSystemError('');
-            } catch (error) {
-                console.error('Failed to fetch agent runtime state', error);
+                setError('');
+            } catch (loadError) {
+                console.error('Failed to load dashboard', loadError);
                 if (active) {
-                    setSystemError('Agent live status could not be refreshed.');
+                    setError('工作台数据加载失败。');
                 }
             }
         };
 
-        void loadSystemState();
-        const timer = window.setInterval(loadSystemState, 15000);
+        void loadPage();
+        const timer = window.setInterval(loadPage, 15000);
         return () => {
             active = false;
             window.clearInterval(timer);
         };
-    }, []);
+    }, [selectedDate, useLLM]);
 
-    const cards = metricCards(stats, overview);
-    const activeRuns = overview?.active_runs || [];
-    const recentSessions = overview?.recent_sessions || [];
-    const loopEntries = Object.entries(runtime?.loops || {});
+    const metrics = [
+        {
+            label: '今日分析任务',
+            value: stats.total_analyses ?? 0,
+            hint: '当天累计分析量',
+            icon: Activity,
+        },
+        {
+            label: '识别到的行人',
+            value: stats.total_pedestrians ?? 0,
+            hint: '当前数据集中的目标总量',
+            icon: Search,
+        },
+        {
+            label: '智能体运行中',
+            value: overview?.counts?.active_runs ?? 0,
+            hint: '当前正在执行的任务',
+            icon: Bot,
+        },
+        {
+            label: '待审批事项',
+            value: overview?.counts?.pending_approvals ?? 0,
+            hint: '需要人工确认的请求',
+            icon: ShieldCheck,
+        },
+    ];
+
+    const quickLinks = [
+        { label: '进入文件库', hint: '上传文件并发起分析', icon: FolderOpen, to: '/files' },
+        { label: '进入检索', hint: '按条件、文本或图片查找目标', icon: Search, to: '/retrieval' },
+        { label: '查看客流分析', hint: '分析趋势与结构分布', icon: TrafficCone, to: '/traffic' },
+        { label: '打开智能体', hint: '直接对话并查看运行状态', icon: Bot, to: '/agent' },
+    ];
 
     return (
-        <div className="client-dashboard">
-            <section className="client-hero">
-                <div>
-                    <span className="client-eyebrow">Urban Insight Client</span>
-                    <h1>Operate analysis, search, and agent workflows from one workspace.</h1>
-                    <p>
-                        This client view is tuned for day-to-day operations: start a task quickly, watch agent
-                        execution, inspect system health, and move straight into retrieval or traffic review.
-                    </p>
-                    <div className="client-hero-actions">
-                        <button type="button" className="btn-primary" onClick={() => navigate('/files')}>
-                            Open evidence library
-                            <ArrowRight size={16} />
-                        </button>
-                        <button type="button" className="btn-secondary" onClick={() => navigate('/agent')}>
-                            Launch agent workspace
-                        </button>
-                    </div>
+        <div className="page-shell">
+            <section className="page-header">
+                <div className="page-title-group">
+                    <span>总览</span>
+                    <h1>今日工作台</h1>
+                    <p>这里聚合了业务数据、智能体状态和简要结论，便于快速开始当天工作。</p>
                 </div>
-
-                <div className="client-hero-side">
-                    <div className="client-hero-badge">
-                        <Clock3 size={16} />
-                        Live operation mode
-                    </div>
-                    <div className="client-hero-kpis">
-                        <div>
-                            <span>Last sync</span>
-                            <strong>{formatDateTime(runtime?.started_at)}</strong>
-                        </div>
-                        <div>
-                            <span>Storage</span>
-                            <strong>{stats.storage_used || '0 B'}</strong>
-                        </div>
-                    </div>
+                <div className="page-header-actions">
+                    <label className="field compact-field">
+                        <span>日期</span>
+                        <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+                    </label>
+                    <label className="checkbox-field">
+                        <input type="checkbox" checked={useLLM} onChange={(event) => setUseLLM(event.target.checked)} />
+                        <span>使用模型生成简报</span>
+                    </label>
                 </div>
             </section>
 
-            {systemError ? <div className="agent-banner error">{systemError}</div> : null}
+            {error ? <div className="notice error">{error}</div> : null}
 
-            <section className="client-metric-grid">
-                {cards.map((card) => {
-                    const Icon = card.icon;
+            <section className="stat-grid">
+                {metrics.map((item) => {
+                    const Icon = item.icon;
                     return (
-                        <div key={card.label} className="client-metric-card">
-                            <div className={`client-metric-icon ${toneClassMap[card.tone] || ''}`}>
-                                <Icon size={22} />
+                        <div key={item.label} className="stat-card">
+                            <div className="stat-card-icon">
+                                <Icon size={18} />
                             </div>
-                            <div className="client-metric-body">
-                                <span>{card.label}</span>
-                                <strong>{card.value}</strong>
-                                <p>{card.detail}</p>
-                            </div>
+                            <span className="stat-label">{item.label}</span>
+                            <strong className="stat-value">{item.value}</strong>
+                            <p className="stat-hint">{item.hint}</p>
                         </div>
                     );
                 })}
             </section>
 
-            <div className="client-dashboard-grid">
-                <section className="agent-panel client-quick-actions-panel">
-                    <div className="agent-panel-header">
+            <section className="card">
+                <div className="card-header">
+                    <div>
+                        <h2 className="card-title">快捷入口</h2>
+                        <p className="card-subtitle">保留最常用的入口，减少切换成本。</p>
+                    </div>
+                </div>
+                <div className="link-grid">
+                    {quickLinks.map((item) => {
+                        const Icon = item.icon;
+                        return (
+                            <button key={item.label} type="button" className="link-card" onClick={() => navigate(item.to)}>
+                                <div className="link-card-icon">
+                                    <Icon size={18} />
+                                </div>
+                                <div>
+                                    <strong>{item.label}</strong>
+                                    <p>{item.hint}</p>
+                                </div>
+                            </button>
+                        );
+                    })}
+                </div>
+            </section>
+
+            <div className="page-grid-2">
+                <section className="card">
+                    <div className="card-header">
                         <div>
-                            <h2>Quick actions</h2>
-                            <p>Start the most common operator flows without digging through the menu.</p>
+                            <h2 className="card-title">智能体状态</h2>
+                            <p className="card-subtitle">查看后台循环和当前活跃任务。</p>
                         </div>
                     </div>
-                    <div className="client-quick-grid">
-                        {quickActions.map((action) => {
-                            const Icon = action.icon;
-                            return (
-                                <button
-                                    key={action.title}
-                                    type="button"
-                                    className="client-action-tile"
-                                    onClick={() => navigate(action.to)}
-                                >
-                                    <div className={`client-action-icon ${toneClassMap[action.tone] || ''}`}>
-                                        <Icon size={20} />
+                    <div className="list">
+                        {Object.entries(runtime?.loops || {}).map(([name, loop]) => (
+                            <div key={name} className="list-row">
+                                <div className="list-row-main">
+                                    <div className="list-row-title">{translateLoopName(name)}</div>
+                                    <div className="list-row-subtitle">最近心跳 {formatDateTime(loop.last_seen_at)}</div>
+                                </div>
+                                <div className="list-row-meta">
+                                    <span className="status-tag is-info">{translateLoopHealth(loop.health)}</span>
+                                    <span>重启 {loop.restart_count ?? 0} 次</span>
+                                </div>
+                            </div>
+                        ))}
+                        {!Object.keys(runtime?.loops || {}).length ? <div className="empty-state">暂无运行状态数据。</div> : null}
+                    </div>
+
+                    <div className="subsection">
+                        <h3>活跃任务</h3>
+                        <div className="list">
+                            {(overview?.active_runs || []).slice(0, 5).map((run) => (
+                                <div key={run.id} className="list-row">
+                                    <div className="list-row-main">
+                                        <div className="list-row-title">{run.session_title || '未命名任务'}</div>
+                                        <div className="list-row-subtitle">{run.result_summary || run.trigger_text || '正在处理中'}</div>
                                     </div>
-                                    <div>
-                                        <strong>{action.title}</strong>
-                                        <p>{action.description}</p>
+                                    <div className="list-row-meta">
+                                        <span className="status-tag is-warning">{run.status || '运行中'}</span>
+                                        <span>{run.progress ?? 0}%</span>
                                     </div>
-                                    <ArrowRight size={16} className="subtle-icon" />
-                                </button>
-                            );
-                        })}
+                                </div>
+                            ))}
+                            {!(overview?.active_runs || []).length ? <div className="empty-state">当前没有活跃任务。</div> : null}
+                        </div>
                     </div>
                 </section>
 
-                <section className="agent-panel client-runtime-panel">
-                    <div className="agent-panel-header">
+                <section className="card">
+                    <div className="card-header">
                         <div>
-                            <h2>Agent live board</h2>
-                            <p>Immediate visibility into automation health, active work, and recent activity.</p>
+                            <h2 className="card-title">今日简报</h2>
+                            <p className="card-subtitle">结合洞察服务生成简短结论。</p>
                         </div>
+                        <span className="page-chip">
+                            <Sparkles size={14} />
+                            {brief?.llm_used ? '模型生成' : '规则生成'}
+                        </span>
                     </div>
 
-                    <div className="client-runtime-section">
-                        <h3>Runtime loops</h3>
-                        <div className="client-loop-grid">
-                            {loopEntries.length ? (
-                                loopEntries.map(([name, loop]) => (
-                                    <div key={name} className="client-loop-card">
-                                        <div className="client-loop-head">
-                                            <strong>{name}</strong>
-                                            <span className={`status-chip ${loop.health === 'healthy' ? 'is-emerald' : 'is-rose'}`}>
-                                                {loop.health}
-                                            </span>
-                                        </div>
-                                        <p>Last heartbeat: {formatDateTime(loop.last_seen_at)}</p>
-                                        <p>Restarts: {loop.restart_count ?? 0}</p>
-                                    </div>
-                                ))
+                    <p className="prose-block">{brief?.summary || '暂无简报内容。'}</p>
+
+                    <div className="subsection">
+                        <h3>重点发现</h3>
+                        <ul className="simple-list">
+                            {(brief?.key_findings || []).length ? (
+                                brief.key_findings.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)
                             ) : (
-                                <div className="agent-empty-state">Runtime status is loading.</div>
+                                <li>暂无重点发现。</li>
                             )}
-                        </div>
+                        </ul>
                     </div>
 
-                    <div className="client-runtime-section">
-                        <div className="client-section-head">
-                            <h3>Active runs</h3>
-                            <button type="button" className="btn-ghost" onClick={() => navigate('/agent')}>
-                                Open agent center
-                            </button>
-                        </div>
-                        {activeRuns.length ? (
-                            <div className="client-run-list">
-                                {activeRuns.slice(0, 4).map((run) => (
-                                    <div key={run.id} className="client-run-row">
-                                        <div>
-                                            <strong>{run.session_title || 'Untitled run'}</strong>
-                                            <p>{run.trigger_text || run.result_summary || 'Agent is processing this task.'}</p>
-                                        </div>
-                                        <div className="client-run-meta">
-                                            <span>{run.progress ?? 0}%</span>
-                                            <span>{run.status}</span>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="agent-empty-state">No live runs at the moment.</div>
-                        )}
-                    </div>
-
-                    <div className="client-runtime-section">
-                        <h3>Recent sessions</h3>
-                        {recentSessions.length ? (
-                            <div className="client-session-list">
-                                {recentSessions.slice(0, 4).map((session) => (
-                                    <button
-                                        key={session.id}
-                                        type="button"
-                                        className="client-session-row"
-                                        onClick={() => navigate('/agent')}
-                                    >
-                                        <div>
-                                            <strong>{session.title || 'Untitled session'}</strong>
-                                            <p>{session.source || 'web'} source</p>
-                                        </div>
-                                        <span>{formatDateTime(session.updated_at)}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="agent-empty-state">No recent session activity yet.</div>
-                        )}
+                    <div className="subsection">
+                        <h3>提醒项</h3>
+                        <ul className="simple-list">
+                            {(brief?.alerts || []).length ? (
+                                brief.alerts.map((item, index) => <li key={`${item.title}-${index}`}>{item.title}：{item.detail}</li>)
+                            ) : (
+                                <li>暂无提醒项。</li>
+                            )}
+                        </ul>
                     </div>
                 </section>
             </div>
 
-            <div className="client-dashboard-grid client-dashboard-grid-secondary">
-                <section className="agent-panel client-brief-panel">
-                    <div className="agent-panel-header">
+            <div className="page-grid-2">
+                <section className="card">
+                    <div className="card-header">
                         <div>
-                            <h2>Daily brief</h2>
-                            <p>Operational summary generated from the selected date and current system insights.</p>
-                        </div>
-                        <div className="client-brief-controls">
-                            <label className="client-llm-toggle">
-                                <input type="checkbox" checked={useLLM} onChange={(event) => setUseLLM(event.target.checked)} />
-                                <span>Use LLM</span>
-                            </label>
-                            <input
-                                type="date"
-                                value={selectedDate}
-                                onChange={(event) => setSelectedDate(event.target.value)}
-                                className="client-date-input"
-                            />
+                            <h2 className="card-title">客流趋势</h2>
+                            <p className="card-subtitle">按时间查看人数变化。</p>
                         </div>
                     </div>
-
-                    <div className="client-brief-body">
-                        {briefLoading ? <div className="agent-empty-state">Generating today&apos;s brief...</div> : null}
-                        {!briefLoading && briefError ? <div className="agent-banner error">{briefError}</div> : null}
-                        {!briefLoading && !briefError && brief ? (
-                            <>
-                                <div className="client-brief-summary">
-                                    <div className="client-brief-icon">
-                                        <Sparkles size={20} />
-                                    </div>
-                                    <div>
-                                        <strong>{brief.llm_used ? 'LLM-assisted brief' : 'Rule-based brief'}</strong>
-                                        <p>{brief.summary || 'No summary available for the selected date.'}</p>
-                                    </div>
-                                </div>
-                                <div className="client-brief-columns">
-                                    <div className="client-brief-box">
-                                        <h3>Key findings</h3>
-                                        <div className="client-bullet-list">
-                                            {(brief.key_findings || []).length ? (
-                                                (brief.key_findings || []).map((item, index) => (
-                                                    <div key={`${item}-${index}`} className="client-bullet-item">
-                                                        <span className="client-bullet-dot" />
-                                                        <p>{item}</p>
-                                                    </div>
-                                                ))
-                                            ) : (
-                                                <div className="agent-empty-state">No key findings for this date.</div>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="client-brief-box">
-                                        <h3>Alerts</h3>
-                                        {(brief.alerts || []).length ? (
-                                            <div className="client-alert-list">
-                                                {(brief.alerts || []).slice(0, 4).map((alert, index) => (
-                                                    <div key={`${alert.title}-${index}`} className="client-alert-row">
-                                                        <div className={`client-alert-accent ${alert.level === 'critical' ? 'is-rose' : 'is-amber'}`} />
-                                                        <div>
-                                                            <strong>{alert.title}</strong>
-                                                            <p>{alert.detail}</p>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <div className="agent-empty-state">No alert items in the current brief.</div>
-                                        )}
-                                    </div>
-                                </div>
-                            </>
-                        ) : null}
-                    </div>
-                </section>
-
-                <section className="agent-panel client-insight-panel">
-                    <div className="agent-panel-header">
-                        <div>
-                            <h2>Flow and audience snapshot</h2>
-                            <p>High-level movement volume and profile mix for rapid operational review.</p>
-                        </div>
-                    </div>
-
-                    <div className="client-chart-wrap">
+                    <div className="chart-box">
                         {stats.traffic_trend?.length ? (
-                            <ResponsiveContainer width="100%" height={260}>
-                                <AreaChart data={stats.traffic_trend} margin={{ top: 12, right: 20, left: 0, bottom: 0 }}>
-                                    <defs>
-                                        <linearGradient id="traffic-gradient-client" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#0f766e" stopOpacity={0.28} />
-                                            <stop offset="95%" stopColor="#0f766e" stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
+                            <ResponsiveContainer width="100%" height={280}>
+                                <AreaChart data={stats.traffic_trend}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                                     <XAxis dataKey="time" />
                                     <YAxis />
                                     <Tooltip />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="count"
-                                        stroke="#0f766e"
-                                        fillOpacity={1}
-                                        fill="url(#traffic-gradient-client)"
-                                    />
+                                    <Area type="monotone" dataKey="count" stroke="#8f6b52" fill="#d9c4b1" fillOpacity={0.55} />
                                 </AreaChart>
                             </ResponsiveContainer>
                         ) : (
-                            <div className="agent-empty-state spacious">Traffic data is not available yet.</div>
+                            <div className="empty-state">暂无趋势数据。</div>
                         )}
                     </div>
+                </section>
 
-                    <div className="client-profile-grid">
-                        <div className="client-profile-card">
-                            <h3>Gender distribution</h3>
+                <section className="card">
+                    <div className="card-header">
+                        <div>
+                            <h2 className="card-title">人群结构</h2>
+                            <p className="card-subtitle">按性别和年龄段查看占比。</p>
+                        </div>
+                    </div>
+
+                    <div className="subsection">
+                        <h3>性别分布</h3>
+                        <div className="meter-list">
                             {Object.entries(stats.gender_distribution || {}).map(([key, value]) => (
-                                <div key={key} className="client-meter-row">
-                                    <div className="client-meter-head">
-                                        <span>{key}</span>
+                                <div key={key} className="meter-row">
+                                    <div className="meter-row-head">
+                                        <span>{translateGenderLabel(key)}</span>
                                         <strong>{value}%</strong>
                                     </div>
-                                    <div className="client-meter-track">
-                                        <div className="client-meter-fill is-blue" style={{ width: `${value}%` }} />
+                                    <div className="meter-track">
+                                        <div className="meter-fill" style={{ width: `${value}%` }} />
                                     </div>
                                 </div>
                             ))}
                         </div>
-                        <div className="client-profile-card">
-                            <h3>Age distribution</h3>
+                    </div>
+
+                    <div className="subsection">
+                        <h3>年龄分布</h3>
+                        <div className="meter-list">
                             {Object.entries(stats.age_distribution || {}).map(([key, value]) => (
-                                <div key={key} className="client-meter-row">
-                                    <div className="client-meter-head">
-                                        <span>{key}</span>
+                                <div key={key} className="meter-row">
+                                    <div className="meter-row-head">
+                                        <span>{translateAgeLabel(key)}</span>
                                         <strong>{value}%</strong>
                                     </div>
-                                    <div className="client-meter-track">
-                                        <div className="client-meter-fill is-emerald" style={{ width: `${value}%` }} />
+                                    <div className="meter-track">
+                                        <div className="meter-fill alt" style={{ width: `${value}%` }} />
                                     </div>
                                 </div>
                             ))}

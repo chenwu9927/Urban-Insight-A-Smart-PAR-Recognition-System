@@ -1,29 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-    Bot,
-    CheckCircle,
-    Key,
-    Loader2,
-    LogOut,
-    Plus,
-    Shield,
-    Trash2,
-    User,
-    Users,
-    XCircle,
-    Zap,
-} from 'lucide-react';
 import { api } from '../lib/api';
 
-const inputStyle = {
-    width: '100%',
-    padding: '0.75rem',
-    borderRadius: '0.5rem',
-    border: '1px solid #d1d5db',
-    fontSize: '0.9rem',
-};
-
-const Settings = ({ user, onLogout }) => {
+function Settings({ user, onLogout }) {
     const [users, setUsers] = useState([]);
     const [showAddUser, setShowAddUser] = useState(false);
     const [newUsername, setNewUsername] = useState('');
@@ -45,7 +23,7 @@ const Settings = ({ user, onLogout }) => {
     const fetchUsers = useCallback(async () => {
         try {
             const response = await api.get('/users');
-            setUsers(response.data);
+            setUsers(response.data || []);
         } catch (error) {
             console.error('Failed to load users', error);
         }
@@ -70,9 +48,9 @@ const Settings = ({ user, onLogout }) => {
 
     useEffect(() => {
         if (user?.role === 'admin') {
-            fetchUsers();
+            void fetchUsers();
         }
-        fetchLLMConfig();
+        void fetchLLMConfig();
     }, [fetchLLMConfig, fetchUsers, user]);
 
     const handleAddUser = async (event) => {
@@ -87,21 +65,21 @@ const Settings = ({ user, onLogout }) => {
             setNewUsername('');
             setNewPassword('');
             setNewRole('user');
-            fetchUsers();
+            void fetchUsers();
         } catch (error) {
-            alert(error.response?.data?.detail || 'Failed to add user.');
+            window.alert(error.response?.data?.detail || '新增用户失败。');
         }
     };
 
     const handleDeleteUser = async (id) => {
-        if (!confirm('Delete this user?')) {
+        if (!window.confirm('确定删除该用户吗？')) {
             return;
         }
         try {
             await api.delete(`/users/${id}`);
-            fetchUsers();
+            void fetchUsers();
         } catch (error) {
-            alert(error.response?.data?.detail || 'Failed to delete user.');
+            window.alert(error.response?.data?.detail || '删除用户失败。');
         }
     };
 
@@ -124,11 +102,11 @@ const Settings = ({ user, onLogout }) => {
                 payload.api_key = llmConfig.apiKey;
             }
             await api.post('/settings/llm', payload);
-            setLlmSaveMessage({ type: 'success', text: 'LLM settings saved.' });
+            setLlmSaveMessage({ type: 'success', text: '模型配置已保存。' });
             setLlmConfig((current) => ({ ...current, apiKey: '' }));
-            fetchLLMConfig();
+            void fetchLLMConfig();
         } catch (error) {
-            setLlmSaveMessage({ type: 'error', text: error.response?.data?.detail || 'Failed to save LLM settings.' });
+            setLlmSaveMessage({ type: 'error', text: error.response?.data?.detail || '模型配置保存失败。' });
         } finally {
             setLlmSaving(false);
         }
@@ -141,339 +119,229 @@ const Settings = ({ user, onLogout }) => {
             const response = await api.post('/settings/llm/test');
             setLlmTestResult(response.data);
         } catch (error) {
-            setLlmTestResult({ success: false, message: error.response?.data?.detail || 'Connection test failed.' });
+            setLlmTestResult({ success: false, message: error.response?.data?.detail || '连接测试失败。' });
         } finally {
             setLlmTesting(false);
         }
     };
 
     const handleClearLLMKey = async () => {
-        if (!confirm('Clear the stored API key?')) {
+        if (!window.confirm('确定清空已保存的 API Key 吗？')) {
             return;
         }
         setLlmSaving(true);
         try {
             await api.post('/settings/llm', { api_key: '' });
-            setLlmSaveMessage({ type: 'success', text: 'API key cleared.' });
-            fetchLLMConfig();
+            setLlmSaveMessage({ type: 'success', text: 'API Key 已清空。' });
+            void fetchLLMConfig();
         } catch {
-            setLlmSaveMessage({ type: 'error', text: 'Failed to clear API key.' });
+            setLlmSaveMessage({ type: 'error', text: 'API Key 清空失败。' });
         } finally {
             setLlmSaving(false);
         }
     };
 
     return (
-        <div>
-            <h1 style={{ fontSize: '1.8rem', marginBottom: '2rem' }}>Settings</h1>
-
-            <div className="stat-card" style={{ marginBottom: '2rem' }}>
-                <h3 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <User size={20} />
-                    Current account
-                </h3>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                    <div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: '0.5rem' }}>{user?.username}</div>
-                        <span
-                            style={{
-                                background: user?.role === 'admin' ? '#dbeafe' : '#f0fdf4',
-                                color: user?.role === 'admin' ? '#1d4ed8' : '#16a34a',
-                                padding: '0.25rem 0.75rem',
-                                borderRadius: '999px',
-                                fontSize: '0.875rem',
-                            }}
-                        >
-                            {user?.role === 'admin' ? 'Administrator' : 'Standard user'}
-                        </span>
-                    </div>
-                    <button
-                        onClick={handleLogout}
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            padding: '0.75rem 1.5rem',
-                            background: '#fee2e2',
-                            color: '#dc2626',
-                            border: 'none',
-                            borderRadius: '0.5rem',
-                            cursor: 'pointer',
-                            fontWeight: 500,
-                        }}
-                    >
-                        <LogOut size={18} />
-                        Log out
+        <div className="page-shell">
+            <section className="page-header">
+                <div className="page-title-group">
+                    <span>设置</span>
+                    <h1>系统设置</h1>
+                    <p>管理当前账号、模型配置和用户列表。</p>
+                </div>
+                <div className="page-header-actions">
+                    <button type="button" className="btn-secondary" onClick={handleLogout}>
+                        退出登录
                     </button>
                 </div>
+            </section>
+
+            <div className="page-grid-2">
+                <section className="card">
+                    <div className="card-header">
+                        <div>
+                            <h2 className="card-title">当前账号</h2>
+                        </div>
+                    </div>
+                    <div className="list">
+                        <div className="list-row">
+                            <div className="list-row-main">
+                                <div className="list-row-title">{user?.username}</div>
+                                <div className="list-row-subtitle">当前登录账号</div>
+                            </div>
+                            <div className="list-row-meta">
+                                <span className="status-tag is-info">{user?.role === 'admin' ? '管理员' : '普通用户'}</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section className="card">
+                    <div className="card-header">
+                        <div>
+                            <h2 className="card-title">模型状态</h2>
+                        </div>
+                    </div>
+                    <div className="list">
+                        <div className="list-row">
+                            <div className="list-row-main">
+                                <div className="list-row-title">Base URL</div>
+                                <div className="list-row-subtitle">{llmConfig.baseUrl}</div>
+                            </div>
+                        </div>
+                        <div className="list-row">
+                            <div className="list-row-main">
+                                <div className="list-row-title">模型</div>
+                                <div className="list-row-subtitle">{llmConfig.model}</div>
+                            </div>
+                            <div className="list-row-meta">
+                                <span className={`status-tag ${llmApiKeySet ? 'is-success' : 'is-warning'}`}>
+                                    {llmApiKeySet ? '已配置 API Key' : '缺少 API Key'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </div>
 
-            <div className="stat-card" style={{ marginBottom: '2rem' }}>
-                <h3 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Bot size={20} />
-                    LLM configuration
-                    <span
-                        style={{
-                            marginLeft: 'auto',
-                            fontSize: '0.75rem',
-                            padding: '0.25rem 0.5rem',
-                            borderRadius: '999px',
-                            background: llmApiKeySet ? '#dcfce7' : '#fef3c7',
-                            color: llmApiKeySet ? '#16a34a' : '#d97706',
-                        }}
-                    >
-                        {llmApiKeySet ? 'Configured' : 'Missing API key'}
-                    </span>
-                </h3>
-
-                <div style={{ marginBottom: '1rem', fontSize: '0.9rem', color: '#6b7280' }}>
-                    Configure the LLM provider used by insight generation, reports, and future agent reasoning flows.
+            <section className="card">
+                <div className="card-header">
+                    <div>
+                        <h2 className="card-title">模型配置</h2>
+                        <p className="card-subtitle">兼容 OpenAI API 格式，可直接接入 LongCat。</p>
+                    </div>
                 </div>
 
-                {!llmConfigLoaded ? (
-                    <div style={{ textAlign: 'center', padding: '2rem', color: '#9ca3af' }}>
-                        <Loader2 size={24} className="spin" />
-                        <div>Loading configuration...</div>
-                    </div>
-                ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                        <div>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: 500 }}>
-                                API key
-                            </label>
-                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                {!llmConfigLoaded ? <div className="empty-state">正在加载配置...</div> : null}
+
+                {llmConfigLoaded ? (
+                    <>
+                        <div className="field-grid three">
+                            <label className="field">
+                                <span>API Key</span>
                                 <input
                                     type="password"
                                     value={llmConfig.apiKey}
                                     onChange={(event) => setLlmConfig((current) => ({ ...current, apiKey: event.target.value }))}
-                                    placeholder={llmApiKeySet ? `Current: ${llmApiKeyPreview} (enter a new value to replace it)` : 'sk-...'}
-                                    style={{ ...inputStyle, flex: 1 }}
+                                    placeholder={llmApiKeySet ? `当前：${llmApiKeyPreview}` : '请输入新的 API Key'}
                                 />
-                                {llmApiKeySet ? (
-                                    <button
-                                        onClick={handleClearLLMKey}
-                                        style={{
-                                            padding: '0.75rem',
-                                            background: '#fee2e2',
-                                            color: '#dc2626',
-                                            border: 'none',
-                                            borderRadius: '0.5rem',
-                                            cursor: 'pointer',
-                                        }}
-                                        title="Clear API key"
-                                    >
-                                        <Trash2 size={18} />
-                                    </button>
-                                ) : null}
-                            </div>
-                        </div>
-
-                        <div>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: 500 }}>
-                                API base URL
                             </label>
-                            <input
-                                type="text"
-                                value={llmConfig.baseUrl}
-                                onChange={(event) => setLlmConfig((current) => ({ ...current, baseUrl: event.target.value }))}
-                                placeholder="https://api.openai.com/v1"
-                                style={inputStyle}
-                            />
-                            <div style={{ marginTop: '0.25rem', fontSize: '0.8rem', color: '#9ca3af' }}>
-                                OpenAI, DeepSeek, and other OpenAI-compatible gateways are supported.
-                            </div>
-                        </div>
 
-                        <div>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: 500 }}>
-                                Model
+                            <label className="field">
+                                <span>Base URL</span>
+                                <input
+                                    type="text"
+                                    value={llmConfig.baseUrl}
+                                    onChange={(event) => setLlmConfig((current) => ({ ...current, baseUrl: event.target.value }))}
+                                />
                             </label>
-                            <input
-                                type="text"
-                                value={llmConfig.model}
-                                onChange={(event) => setLlmConfig((current) => ({ ...current, model: event.target.value }))}
-                                placeholder="gpt-4o-mini"
-                                style={inputStyle}
-                            />
-                            <div style={{ marginTop: '0.25rem', fontSize: '0.8rem', color: '#9ca3af' }}>
-                                Common models: gpt-4o-mini, gpt-4o, deepseek-chat, glm-4.
-                            </div>
+
+                            <label className="field">
+                                <span>模型名</span>
+                                <input
+                                    type="text"
+                                    value={llmConfig.model}
+                                    onChange={(event) => setLlmConfig((current) => ({ ...current, model: event.target.value }))}
+                                />
+                            </label>
                         </div>
 
-                        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
-                            <button
-                                onClick={handleSaveLLMConfig}
-                                disabled={llmSaving}
-                                className="btn-primary"
-                                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', opacity: llmSaving ? 0.7 : 1 }}
-                            >
-                                {llmSaving ? <Loader2 size={16} className="spin" /> : <Key size={16} />}
-                                Save configuration
+                        <div className="action-row">
+                            <button type="button" className="btn-primary" onClick={handleSaveLLMConfig} disabled={llmSaving}>
+                                {llmSaving ? '保存中...' : '保存配置'}
                             </button>
-                            <button
-                                onClick={handleTestLLMConnection}
-                                disabled={llmTesting || !llmApiKeySet}
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem',
-                                    padding: '0.75rem 1.5rem',
-                                    background: llmApiKeySet ? '#f0f9ff' : '#f3f4f6',
-                                    color: llmApiKeySet ? '#0369a1' : '#9ca3af',
-                                    border: 'none',
-                                    borderRadius: '0.5rem',
-                                    cursor: llmApiKeySet ? 'pointer' : 'not-allowed',
-                                    fontWeight: 500,
-                                    opacity: llmTesting ? 0.7 : 1,
-                                }}
-                            >
-                                {llmTesting ? <Loader2 size={16} className="spin" /> : <Zap size={16} />}
-                                Test connection
+                            <button type="button" className="btn-secondary" onClick={handleTestLLMConnection} disabled={llmTesting || !llmApiKeySet}>
+                                {llmTesting ? '测试中...' : '测试连接'}
                             </button>
+                            {llmApiKeySet ? (
+                                <button type="button" className="btn-ghost danger" onClick={handleClearLLMKey} disabled={llmSaving}>
+                                    清空 API Key
+                                </button>
+                            ) : null}
                         </div>
 
-                        {llmSaveMessage ? (
-                            <div
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem',
-                                    padding: '0.75rem 1rem',
-                                    borderRadius: '0.5rem',
-                                    background: llmSaveMessage.type === 'success' ? '#dcfce7' : '#fee2e2',
-                                    color: llmSaveMessage.type === 'success' ? '#16a34a' : '#dc2626',
-                                }}
-                            >
-                                {llmSaveMessage.type === 'success' ? <CheckCircle size={18} /> : <XCircle size={18} />}
-                                {llmSaveMessage.text}
-                            </div>
-                        ) : null}
-
+                        {llmSaveMessage ? <div className={`notice ${llmSaveMessage.type}`}>{llmSaveMessage.text}</div> : null}
                         {llmTestResult ? (
-                            <div
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem',
-                                    padding: '0.75rem 1rem',
-                                    borderRadius: '0.5rem',
-                                    background: llmTestResult.success ? '#dcfce7' : '#fee2e2',
-                                    color: llmTestResult.success ? '#16a34a' : '#dc2626',
-                                }}
-                            >
-                                {llmTestResult.success ? <CheckCircle size={18} /> : <XCircle size={18} />}
-                                {llmTestResult.message}
-                            </div>
+                            <div className={`notice ${llmTestResult.success ? 'success' : 'error'}`}>{llmTestResult.message}</div>
                         ) : null}
-                    </div>
-                )}
-            </div>
+                    </>
+                ) : null}
+            </section>
 
             {user?.role === 'admin' ? (
-                <div className="stat-card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', gap: '1rem', flexWrap: 'wrap' }}>
-                        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <Users size={20} />
-                            User management
-                        </h3>
-                        <button className="btn-primary" onClick={() => setShowAddUser(true)} style={{ padding: '0.5rem 1rem' }}>
-                            <Plus size={16} />
-                            Add user
+                <section className="card">
+                    <div className="card-header">
+                        <div>
+                            <h2 className="card-title">用户管理</h2>
+                            <p className="card-subtitle">增删平台用户。</p>
+                        </div>
+                        <button type="button" className="btn-primary" onClick={() => setShowAddUser((current) => !current)}>
+                            {showAddUser ? '收起表单' : '新增用户'}
                         </button>
                     </div>
 
                     {showAddUser ? (
-                        <form
-                            onSubmit={handleAddUser}
-                            style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '0.5rem', marginBottom: '1.5rem' }}
-                        >
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '1rem', alignItems: 'end' }}>
-                                <div>
-                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Username</label>
-                                    <input value={newUsername} onChange={(event) => setNewUsername(event.target.value)} style={inputStyle} required />
-                                </div>
-                                <div>
-                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Password</label>
-                                    <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} style={inputStyle} required />
-                                </div>
-                                <div>
-                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Role</label>
-                                    <select value={newRole} onChange={(event) => setNewRole(event.target.value)} style={inputStyle}>
-                                        <option value="user">User</option>
-                                        <option value="admin">Admin</option>
+                        <form className="card subtle-card" onSubmit={handleAddUser}>
+                            <div className="field-grid three">
+                                <label className="field">
+                                    <span>用户名</span>
+                                    <input value={newUsername} onChange={(event) => setNewUsername(event.target.value)} required />
+                                </label>
+                                <label className="field">
+                                    <span>密码</span>
+                                    <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required />
+                                </label>
+                                <label className="field">
+                                    <span>角色</span>
+                                    <select value={newRole} onChange={(event) => setNewRole(event.target.value)}>
+                                        <option value="user">普通用户</option>
+                                        <option value="admin">管理员</option>
                                     </select>
-                                </div>
-                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <button type="submit" className="btn-primary" style={{ padding: '0.5rem 1rem' }}>
-                                        Create
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowAddUser(false)}
-                                        style={{ padding: '0.5rem 1rem', border: '1px solid #d1d5db', borderRadius: '0.375rem', background: 'white', cursor: 'pointer' }}
-                                    >
-                                        Cancel
-                                    </button>
-                                </div>
+                                </label>
+                            </div>
+                            <div className="action-row">
+                                <button type="submit" className="btn-primary">创建用户</button>
+                                <button type="button" className="btn-secondary" onClick={() => setShowAddUser(false)}>取消</button>
                             </div>
                         </form>
                     ) : null}
 
-                    <div className="table-container">
+                    <div className="table-wrap">
                         <table>
                             <thead>
                                 <tr>
                                     <th>ID</th>
-                                    <th>Username</th>
-                                    <th>Role</th>
-                                    <th>Created at</th>
-                                    <th>Actions</th>
+                                    <th>用户名</th>
+                                    <th>角色</th>
+                                    <th>创建时间</th>
+                                    <th>操作</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {users.map((entry) => (
                                     <tr key={entry.id}>
                                         <td>#{entry.id}</td>
-                                        <td>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                {entry.role === 'admin' ? <Shield size={14} color="#1d4ed8" /> : null}
-                                                {entry.username}
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <span
-                                                style={{
-                                                    background: entry.role === 'admin' ? '#dbeafe' : '#f0fdf4',
-                                                    color: entry.role === 'admin' ? '#1d4ed8' : '#16a34a',
-                                                    padding: '0.2rem 0.5rem',
-                                                    borderRadius: '999px',
-                                                    fontSize: '0.8rem',
-                                                }}
-                                            >
-                                                {entry.role === 'admin' ? 'Admin' : 'User'}
-                                            </span>
-                                        </td>
-                                        <td>{new Date(entry.created_at).toLocaleString()}</td>
+                                        <td>{entry.username}</td>
+                                        <td>{entry.role === 'admin' ? '管理员' : '普通用户'}</td>
+                                        <td>{new Date(entry.created_at).toLocaleString('zh-CN')}</td>
                                         <td>
                                             {entry.username !== 'admin' ? (
-                                                <button
-                                                    onClick={() => handleDeleteUser(entry.id)}
-                                                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#ef4444' }}
-                                                    title="Delete user"
-                                                >
-                                                    <Trash2 size={16} />
+                                                <button type="button" className="btn-ghost danger" onClick={() => handleDeleteUser(entry.id)}>
+                                                    删除
                                                 </button>
-                                            ) : null}
+                                            ) : (
+                                                <span className="status-tag is-info">默认管理员</span>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
-                </div>
+                </section>
             ) : null}
         </div>
     );
-};
+}
 
 export default Settings;
