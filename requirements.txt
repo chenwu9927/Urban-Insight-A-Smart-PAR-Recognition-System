@@ -6,8 +6,6 @@ pydantic
 sqlalchemy
 
 # ML Core
-torch
-torchvision
 numpy
 opencv-python
 Pillow

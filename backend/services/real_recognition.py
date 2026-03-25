@@ -1,31 +1,39 @@
-import torch
-import torch.nn as nn
+import os
+import queue
+import site
+import threading
+import uuid
+import importlib.util
+from typing import Any, Dict, List, Optional, Tuple
+
 import cv2
 import numpy as np
 import timm
-import queue
-import threading
-from ultralytics import YOLO
+import torch
+import torch.nn as nn
 from PIL import Image
-from torchvision import transforms as T
-from typing import List, Dict, Any, Optional
-import os
-import uuid
-from .recognition import BaseRecognizer, RecognitionResult, BoundingBox, PedestrianAttribute
 from sklearn.cluster import KMeans
+from torchvision import transforms as T
+from ultralytics import YOLO
+
+from .recognition import BaseRecognizer, RecognitionResult, BoundingBox, PedestrianAttribute
 
 # Configuration
-IMG_SIZE = 112
 ATTRIBUTES = [
-    'Female', 'AgeOver60', 'Age18-60', 'AgeLess18', 
-    'Front', 'Side', 'Back', 
-    'Hat', 'Glasses', 
-    'HandBag', 'ShoulderBag', 'Backpack', 'HoldObjectsInFront', 
-    'ShortSleeve', 'LongSleeve', 
-    'UpperStride', 'UpperLogo', 'UpperPlaid', 'UpperSplice', 
-    'LowerStripe', 'LowerPattern', 'LongCoat', 
+    'Female', 'AgeOver60', 'Age18-60', 'AgeLess18',
+    'Front', 'Side', 'Back',
+    'Hat', 'Glasses',
+    'HandBag', 'ShoulderBag', 'Backpack', 'HoldObjectsInFront',
+    'ShortSleeve', 'LongSleeve',
+    'UpperStripe', 'UpperLogo', 'UpperPlaid', 'UpperSplice',
+    'LowerStripe', 'LowerPattern', 'LongCoat',
     'Trousers', 'Shorts', 'Skirt&Dress', 'boots'
 ]
+AGE_ATTRS = ["AgeOver60", "Age18-60", "AgeLess18"]
+VIEW_ATTRS = ["Front", "Side", "Back"]
+DEFAULT_ATTR_MODEL_NAME = "mobilenetv4_conv_small_050.e3000_r224_in1k"
+DEFAULT_ATTR_MODEL_PATH = os.path.join("model", "models", "mobilenet", "best_model.pth")
+DEFAULT_ATTR_IMAGE_SIZE = 224
 
 REID_SIM_THRESHOLD = 0.6
 REID_SIM_STRICT = 0.75
@@ -34,20 +42,117 @@ TRACK_MAX_AGE_SECONDS = 5
 REID_MAX_AGE_SECONDS = 30
 EMBEDDING_MOMENTUM = 0.7
 
-class PedestrianAttributeNet(nn.Module):
-    def __init__(self, model_name, num_classes, img_size=112):
-        super(PedestrianAttributeNet, self).__init__()
+
+def _load_checkpoint_compat(path: str, device: torch.device):
+    try:
+        return torch.load(path, map_location=device, weights_only=True)
+    except TypeError:
+        return torch.load(path, map_location=device)
+    except Exception:
+        return torch.load(path, map_location=device, weights_only=False)
+
+
+def _resolve_path(base_path: str, raw_path: str) -> str:
+    if os.path.isabs(raw_path):
+        return raw_path
+    return os.path.join(base_path, raw_path)
+
+
+def _derive_group_indices(attr_names: List[str]) -> Tuple[List[int], List[int], List[int]]:
+    attr_to_idx = {name: i for i, name in enumerate(attr_names)}
+    age_indices = [attr_to_idx[name] for name in AGE_ATTRS if name in attr_to_idx]
+    view_indices = [attr_to_idx[name] for name in VIEW_ATTRS if name in attr_to_idx]
+    grouped = set(age_indices + view_indices)
+    binary_indices = [i for i in range(len(attr_names)) if i not in grouped]
+    return binary_indices, age_indices, view_indices
+
+
+def _grouped_probs_to_raw_probs(
+    binary_probs: np.ndarray,
+    age_probs: np.ndarray,
+    view_probs: np.ndarray,
+    attr_count: int,
+    binary_indices: List[int],
+    age_indices: List[int],
+    view_indices: List[int],
+) -> np.ndarray:
+    raw_probs = np.zeros((binary_probs.shape[0], attr_count), dtype=np.float32)
+    raw_probs[:, binary_indices] = binary_probs
+    raw_probs[:, age_indices] = age_probs
+    raw_probs[:, view_indices] = view_probs
+    return raw_probs
+
+
+def _grouped_preds_to_raw_preds(
+    binary_preds: np.ndarray,
+    age_pred: np.ndarray,
+    view_pred: np.ndarray,
+    attr_count: int,
+    binary_indices: List[int],
+    age_indices: List[int],
+    view_indices: List[int],
+) -> np.ndarray:
+    raw_preds = np.zeros((binary_preds.shape[0], attr_count), dtype=np.int64)
+    raw_preds[:, binary_indices] = binary_preds
+    raw_preds[np.arange(binary_preds.shape[0]), np.array(age_indices)[age_pred]] = 1
+    raw_preds[np.arange(binary_preds.shape[0]), np.array(view_indices)[view_pred]] = 1
+    return raw_preds
+
+
+def _build_eval_transform(model_name: str, image_size: int) -> T.Compose:
+    backbone = timm.create_model(model_name, pretrained=False)
+    data_cfg = timm.data.resolve_model_data_config(backbone)
+    mean = data_cfg.get("mean", (0.485, 0.456, 0.406))
+    std = data_cfg.get("std", (0.229, 0.224, 0.225))
+    del backbone
+    return T.Compose([
+        T.Resize((image_size, image_size), interpolation=T.InterpolationMode.BICUBIC),
+        T.ToTensor(),
+        T.Normalize(mean=mean, std=std),
+    ])
+
+
+def _load_torchreid_osnet_module():
+    candidate_roots = []
+    try:
+        candidate_roots.extend(site.getsitepackages())
+    except Exception:
+        pass
+    try:
+        user_site = site.getusersitepackages()
+        if user_site:
+            candidate_roots.append(user_site)
+    except Exception:
+        pass
+
+    for root in candidate_roots:
+        module_path = os.path.join(root, "torchreid", "reid", "models", "osnet.py")
+        if not os.path.exists(module_path):
+            continue
+        spec = importlib.util.spec_from_file_location("_torchreid_osnet_dynamic", module_path)
+        if spec is None or spec.loader is None:
+            continue
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    raise ImportError("torchreid osnet.py not found in site-packages")
+
+
+class LegacyPedestrianAttributeNet(nn.Module):
+    def __init__(self, model_name: str, num_classes: int, img_size: int = DEFAULT_ATTR_IMAGE_SIZE):
+        super().__init__()
         self.backbone = timm.create_model(
-            model_name, 
-            pretrained=False, 
-            num_classes=0, 
-            global_pool='' 
+            model_name,
+            pretrained=False,
+            num_classes=0,
+            global_pool=""
         )
         with torch.no_grad():
             dummy = torch.randn(1, 3, img_size, img_size)
             features = self.backbone(dummy)
             self.in_features = features.shape[1]
-        
+
         self.head = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
@@ -55,10 +160,219 @@ class PedestrianAttributeNet(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(self.in_features, num_classes)
         )
-        
+
     def forward(self, x):
         x = self.backbone(x)
         return self.head(x)
+
+
+class UnifiedMultiHeadPA100KNet(nn.Module):
+    def __init__(
+        self,
+        model_name: str,
+        binary_dim: int,
+        age_dim: int,
+        view_dim: int,
+        head_dropout: float = 0.25,
+        drop_rate: float = 0.0,
+        drop_path_rate: float = 0.0,
+    ):
+        super().__init__()
+        self.backbone = timm.create_model(
+            model_name,
+            pretrained=False,
+            num_classes=0,
+            global_pool="avg",
+            drop_rate=drop_rate,
+            drop_path_rate=drop_path_rate,
+        )
+        feat_dim = self.backbone.num_features
+        self.pre_head = nn.Sequential(
+            nn.LayerNorm(feat_dim),
+            nn.Dropout(head_dropout),
+        )
+        self.binary_head = nn.Linear(feat_dim, binary_dim)
+        self.age_head = nn.Linear(feat_dim, age_dim)
+        self.view_head = nn.Linear(feat_dim, view_dim)
+
+    def forward_with_features(self, x):
+        feat = self.backbone(x)
+        feat = self.pre_head(feat)
+        outputs = {
+            "binary": self.binary_head(feat),
+            "age": self.age_head(feat),
+            "view": self.view_head(feat),
+        }
+        return outputs, feat
+
+    def forward(self, x):
+        outputs, _ = self.forward_with_features(x)
+        return outputs
+
+
+class AttributePredictor:
+    def __init__(self, base_path: str, device: torch.device):
+        self.base_path = base_path
+        self.device = device
+        self.mode = "legacy"
+        self.model = None
+        self.model_name = os.getenv("ATTR_MODEL_NAME", "").strip()
+        self.image_size = int(os.getenv("ATTR_IMAGE_SIZE", str(DEFAULT_ATTR_IMAGE_SIZE)))
+        self.attr_names = list(ATTRIBUTES)
+        self.binary_indices, self.age_indices, self.view_indices = _derive_group_indices(self.attr_names)
+        self.thresholds = np.full(len(self.binary_indices), 0.5, dtype=np.float32)
+
+        raw_path = os.getenv("ATTR_MODEL_PATH", DEFAULT_ATTR_MODEL_PATH)
+        self.model_path = _resolve_path(self.base_path, raw_path)
+        if not os.path.exists(self.model_path):
+            raise FileNotFoundError(f"Attribute model not found: {self.model_path}")
+
+        checkpoint = _load_checkpoint_compat(self.model_path, self.device)
+        if self._looks_like_unified_checkpoint(checkpoint):
+            self._load_unified(checkpoint)
+        else:
+            self._load_legacy(checkpoint)
+
+        self.preprocess = _build_eval_transform(self.model_name, self.image_size)
+
+    @staticmethod
+    def _looks_like_unified_checkpoint(checkpoint: Any) -> bool:
+        return isinstance(checkpoint, dict) and any(k in checkpoint for k in ("ema_state_dict", "model_state_dict"))
+
+    def _load_unified(self, checkpoint: Dict[str, Any]):
+        config = checkpoint.get("config") or {}
+        self.model_name = self.model_name or config.get("model_name") or DEFAULT_ATTR_MODEL_NAME
+        self.image_size = int(config.get("image_size") or self.image_size or DEFAULT_ATTR_IMAGE_SIZE)
+        self.attr_names = list(checkpoint.get("attr_names") or ATTRIBUTES)
+        self.binary_indices = list(checkpoint.get("binary_indices") or [])
+        self.age_indices = list(checkpoint.get("age_indices") or [])
+        self.view_indices = list(checkpoint.get("view_indices") or [])
+        if not (self.binary_indices and self.age_indices and self.view_indices):
+            self.binary_indices, self.age_indices, self.view_indices = _derive_group_indices(self.attr_names)
+
+        state_dict = checkpoint.get("ema_state_dict") or checkpoint.get("model_state_dict")
+        if not isinstance(state_dict, dict):
+            raise ValueError(f"Invalid unified checkpoint: {self.model_path}")
+
+        self.model = UnifiedMultiHeadPA100KNet(
+            model_name=self.model_name,
+            binary_dim=len(self.binary_indices),
+            age_dim=len(self.age_indices),
+            view_dim=len(self.view_indices),
+            head_dropout=float(config.get("head_dropout", 0.25)),
+            drop_rate=float(config.get("drop_rate", 0.0)),
+            drop_path_rate=float(config.get("drop_path_rate", 0.0)),
+        )
+        self.model.load_state_dict(state_dict, strict=True)
+        self.model.to(self.device)
+        self.model.eval()
+        thresholds = checkpoint.get("thresholds") or [0.5] * len(self.binary_indices)
+        self.thresholds = np.asarray(thresholds, dtype=np.float32)
+        self.mode = "unified"
+
+    def _load_legacy(self, checkpoint: Any):
+        state_dict = checkpoint if isinstance(checkpoint, dict) else checkpoint.state_dict()
+        self.model_name = self.model_name or DEFAULT_ATTR_MODEL_NAME
+        self.model = LegacyPedestrianAttributeNet(
+            self.model_name,
+            len(self.attr_names),
+            img_size=self.image_size,
+        )
+        self.model.load_state_dict(state_dict, strict=True)
+        self.model.to(self.device)
+        self.model.eval()
+        self.mode = "legacy"
+
+    def _raw_predictions_to_attrs(self, raw_preds: np.ndarray) -> Dict[str, Any]:
+        detected = [self.attr_names[i] for i, active in enumerate(raw_preds) if int(active) == 1]
+
+        gender = "Female" if "Female" in detected else "Male"
+        if "AgeLess18" in detected:
+            age = "Child"
+        elif "AgeOver60" in detected:
+            age = "Senior"
+        else:
+            age = "Adult"
+
+        if "Back" in detected:
+            orientation = "Back"
+        elif "Side" in detected:
+            orientation = "Side"
+        else:
+            orientation = "Front"
+
+        backpack = "Backpack" in detected
+        bag = any(name in detected for name in ["HandBag", "ShoulderBag", "Backpack", "HoldObjectsInFront"])
+        hat = "Hat" in detected
+        glasses = "Glasses" in detected
+
+        if "LongSleeve" in detected:
+            upper_type = "LongSleeve"
+        elif "ShortSleeve" in detected:
+            upper_type = "ShortSleeve"
+        else:
+            upper_type = "Unknown"
+
+        if "Skirt&Dress" in detected:
+            lower_type = "Skirt"
+        elif "Shorts" in detected:
+            lower_type = "Shorts"
+        elif "Trousers" in detected:
+            lower_type = "Trousers"
+        else:
+            lower_type = "Unknown"
+
+        return {
+            "gender": gender,
+            "age_group": age,
+            "has_backpack": backpack,
+            "has_bag": bag,
+            "has_hat": hat,
+            "has_glasses": glasses,
+            "orientation": orientation,
+            "upper_type": upper_type,
+            "lower_type": lower_type,
+            "raw_attrs": detected,
+        }
+
+    def predict(self, image_crop, return_embedding: bool = False):
+        image_pil = Image.fromarray(cv2.cvtColor(image_crop, cv2.COLOR_BGR2RGB))
+        input_tensor = self.preprocess(image_pil).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            if self.mode == "unified":
+                outputs, embedding_tensor = self.model.forward_with_features(input_tensor)
+                binary_probs = torch.sigmoid(outputs["binary"]).cpu().numpy()
+                age_probs = torch.softmax(outputs["age"], dim=1).cpu().numpy()
+                view_probs = torch.softmax(outputs["view"], dim=1).cpu().numpy()
+                binary_preds = (binary_probs[0] >= self.thresholds).astype(np.int64)
+                age_pred = age_probs.argmax(axis=1)
+                view_pred = view_probs.argmax(axis=1)
+                raw_preds = _grouped_preds_to_raw_preds(
+                    binary_preds[None, :],
+                    age_pred,
+                    view_pred,
+                    len(self.attr_names),
+                    self.binary_indices,
+                    self.age_indices,
+                    self.view_indices,
+                )[0]
+                embedding = embedding_tensor.squeeze(0).detach().cpu().numpy().astype(np.float32)
+            else:
+                features = self.model.backbone(input_tensor)
+                logits = self.model.head(features)
+                probs = torch.sigmoid(logits)[0].cpu().numpy()
+                raw_preds = (probs >= 0.5).astype(np.int64)
+                if features.dim() == 4:
+                    features = features.mean(dim=(2, 3))
+                embedding = features.squeeze(0).detach().cpu().numpy().astype(np.float32)
+
+        norm = np.linalg.norm(embedding) or 1.0
+        embedding = embedding / norm
+        attrs = self._raw_predictions_to_attrs(raw_preds)
+        if return_embedding:
+            return attrs, embedding
+        return attrs
 
 
 class ReIDExtractor:
@@ -89,13 +403,46 @@ class ReIDExtractor:
 
         if backend == "torchreid":
             try:
-                import torchreid  # type: ignore
+                from collections import OrderedDict
 
                 name = model_name or "osnet_x1_0"
-                self.model = torchreid.models.build_model(name, num_classes=0, pretrained=True)
+                if name.startswith("osnet_"):
+                    osnet_module = _load_torchreid_osnet_module()
+                    factory = getattr(osnet_module, name, None)
+                    if factory is None:
+                        raise KeyError(f"Unknown OSNet variant: {name}")
+                    self.model = factory(
+                        num_classes=0,
+                        pretrained=not bool(model_path),
+                        loss="softmax",
+                        use_gpu=(self.device.type == "cuda"),
+                    )
+                else:
+                    from torchreid.reid import models as torchreid_models  # type: ignore
+
+                    self.model = torchreid_models.build_model(
+                        name,
+                        num_classes=0,
+                        pretrained=not bool(model_path),
+                        use_gpu=(self.device.type == "cuda"),
+                    )
+                if model_path:
+                    loaded = _load_checkpoint_compat(model_path, self.device)
+                    if not isinstance(loaded, dict):
+                        raise ValueError(f"Unsupported torchreid checkpoint: {model_path}")
+                    raw_state_dict = OrderedDict()
+                    for key, value in loaded.items():
+                        normalized = key[7:] if key.startswith("module.") else key
+                        raw_state_dict[normalized] = value
+                    model_state = self.model.state_dict()
+                    matched_state = OrderedDict()
+                    for key, value in raw_state_dict.items():
+                        if key in model_state and model_state[key].shape == value.shape:
+                            matched_state[key] = value
+                    self.model.load_state_dict(matched_state, strict=False)
                 self.model.to(self.device)
                 self.model.eval()
-                self.source = f"torchreid:{name}"
+                self.source = f"torchreid:{name}" if not model_path else f"torchreid:{name}:{model_path}"
                 return
             except Exception as e:
                 print(f"[warn] torchreid unavailable: {e}")
@@ -160,16 +507,12 @@ class RealPedestrianRecognizer(BaseRecognizer):
             print(f"Error loading YOLO: {e}")
             raise e
 
-        # Load Attribute Model
-        attr_path = os.path.join(self.model_dir, "models", "mobilenet", "best_model.pth")
-        model_name = 'mobilenetv4_conv_small_050.e3000_r224_in1k'
-        self.attr_model = PedestrianAttributeNet(model_name, len(ATTRIBUTES), img_size=IMG_SIZE)
-        
         try:
-            self.attr_model.load_state_dict(torch.load(attr_path, map_location=self.device))
-            self.attr_model.to(self.device)
-            self.attr_model.eval()
-            print("Attribute model loaded.")
+            self.attr_predictor = AttributePredictor(self.base_path, self.device)
+            print(
+                "Attribute model loaded "
+                f"({self.attr_predictor.mode}:{self.attr_predictor.model_name} @ {self.attr_predictor.model_path})."
+            )
         except Exception as e:
             print(f"Error loading Attribute model: {e}")
             raise e
@@ -179,13 +522,6 @@ class RealPedestrianRecognizer(BaseRecognizer):
             print(f"ReID model ready ({self.reid_extractor.source}).")
         else:
             print("ReID model not configured, fallback to attribute backbone.")
-            
-        # Transforms
-        self.preprocess = T.Compose([
-            T.Resize((IMG_SIZE, IMG_SIZE)),
-            T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
 
     def _extract_color(self, image_crop):
         """
@@ -231,67 +567,7 @@ class RealPedestrianRecognizer(BaseRecognizer):
         return best_color
 
     def _predict_attrs(self, image_crop, return_embedding: bool = False):
-        # Convert to PIL
-        image_pil = Image.fromarray(cv2.cvtColor(image_crop, cv2.COLOR_BGR2RGB))
-        input_tensor = self.preprocess(image_pil).unsqueeze(0).to(self.device)
-        
-        with torch.no_grad():
-            features = self.attr_model.backbone(input_tensor)
-            logits = self.attr_model.head(features)
-            probs = torch.sigmoid(logits)[0].cpu().numpy()
-
-        embedding = None
-        if return_embedding:
-            if features.dim() == 4:
-                pooled = features.mean(dim=(2, 3))
-            else:
-                pooled = features
-            embedding = pooled.squeeze(0).detach().cpu().numpy().astype(np.float32)
-            norm = np.linalg.norm(embedding) or 1.0
-            embedding = embedding / norm
-            
-        active_indices = np.where(probs > 0.5)[0]
-        detected = [ATTRIBUTES[i] for i in active_indices]
-        
-        # Parse into structured attribute object
-        gender = "Female" if "Female" in detected else "Male"
-        
-        age = "Adult"
-        if "AgeLess18" in detected: age = "Child"
-        elif "AgeOver60" in detected: age = "Senior"
-        
-        # Orientation
-        orientation = "Front"
-        if "Side" in detected: orientation = "Side"
-        if "Back" in detected: orientation = "Back"
-        
-        # Accessories
-        hat = "Hat" in detected
-        glasses = "Glasses" in detected
-        bag = any(k in detected for k in ['HandBag', 'ShoulderBag', 'Backpack'])
-        backpack = "Backpack" in detected
-        
-        # Clothing
-        upper_type = "LongSleeve" if "LongSleeve" in detected else "ShortSleeve"
-        lower_type = "Trousers"
-        if "Shorts" in detected: lower_type = "Shorts"
-        elif "Skirt&Dress" in detected: lower_type = "Skirt"
-        
-        attrs = {
-            "gender": gender,
-            "age_group": age,
-            "has_backpack": backpack,
-            "has_bag": bag,
-            "has_hat": hat,
-            "has_glasses": glasses,
-            "orientation": orientation,
-            "upper_type": upper_type,
-            "lower_type": lower_type,
-            "raw_attrs": detected
-        }
-        if return_embedding:
-            return attrs, embedding
-        return attrs
+        return self.attr_predictor.predict(image_crop, return_embedding=return_embedding)
 
     @staticmethod
     def _bbox_iou(a, b) -> float:

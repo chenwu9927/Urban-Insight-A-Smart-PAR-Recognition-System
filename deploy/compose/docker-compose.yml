@@ -8,6 +8,13 @@ x-backend-env: &backend-env
   LLM_BASE_URL: ${LLM_BASE_URL:-https://api.longcat.chat/openai}
   LLM_MODEL: ${LLM_MODEL:-LongCat-Flash-Lite}
   LLM_CACHE_TTL_SECONDS: ${LLM_CACHE_TTL_SECONDS:-3600}
+  ATTR_MODEL_PATH: ${ATTR_MODEL_PATH:-model/models/mobilenet/best_model.pth}
+  ATTR_MODEL_NAME: ${ATTR_MODEL_NAME:-}
+  ATTR_IMAGE_SIZE: ${ATTR_IMAGE_SIZE:-224}
+  REID_BACKEND: ${REID_BACKEND:-}
+  REID_MODEL_PATH: ${REID_MODEL_PATH:-}
+  REID_MODEL_NAME: ${REID_MODEL_NAME:-}
+  REID_INPUT_SIZE: ${REID_INPUT_SIZE:-}
 
 x-python-healthcheck: &python-healthcheck
   test:
@@ -102,7 +109,15 @@ services:
       dockerfile: deploy/docker/python-service.Dockerfile
     restart: unless-stopped
     command: uvicorn services.analysis_service.app:app --host 0.0.0.0 --port 8000
-    environment: *service-env
+    environment:
+      <<: *service-env
+      ATTR_MODEL_PATH: ${ANALYSIS_ATTR_MODEL_PATH:-model/models/mobilenet/best_model.pth}
+      ATTR_MODEL_NAME: ${ANALYSIS_ATTR_MODEL_NAME:-}
+      ATTR_IMAGE_SIZE: ${ANALYSIS_ATTR_IMAGE_SIZE:-224}
+      REID_BACKEND: ${ANALYSIS_REID_BACKEND:-}
+      REID_MODEL_NAME: ${ANALYSIS_REID_MODEL_NAME:-}
+      REID_MODEL_PATH: ${ANALYSIS_REID_MODEL_PATH:-}
+      REID_INPUT_SIZE: ${ANALYSIS_REID_INPUT_SIZE:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,7 +132,15 @@ services:
       dockerfile: deploy/docker/python-service.Dockerfile
     restart: unless-stopped
     command: uvicorn services.search_service.app:app --host 0.0.0.0 --port 8000
-    environment: *service-env
+    environment:
+      <<: *service-env
+      ATTR_MODEL_PATH: ${SEARCH_ATTR_MODEL_PATH:-model/models/mobilenet/best_model.pth}
+      ATTR_MODEL_NAME: ${SEARCH_ATTR_MODEL_NAME:-}
+      ATTR_IMAGE_SIZE: ${SEARCH_ATTR_IMAGE_SIZE:-224}
+      REID_BACKEND: ${SEARCH_REID_BACKEND:-}
+      REID_MODEL_NAME: ${SEARCH_REID_MODEL_NAME:-osnet_x1_0}
+      REID_MODEL_PATH: ${SEARCH_REID_MODEL_PATH:-}
+      REID_INPUT_SIZE: ${SEARCH_REID_INPUT_SIZE:-256x128}
     depends_on:
       postgres:
         condition: service_healthy
