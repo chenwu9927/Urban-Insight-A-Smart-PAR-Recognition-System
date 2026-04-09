@@ -331,8 +331,6 @@ class EmailConnectorService:
             return 0, ["IMAP inbound polling is enabled but not fully configured"]
 
         state = self._read_state()
-        mailbox = self.settings.imap_mailbox
-        last_uid = int(state.get(mailbox, 0) or 0)
         processed = 0
         details: list[str] = []
 
@@ -343,102 +341,114 @@ class EmailConnectorService:
             else:
                 client = imaplib.IMAP4(self.settings.imap_host, self.settings.imap_port)
             client.login(self.settings.imap_username, self.settings.imap_password)
-            status, _ = client.select(mailbox)
-            if status != "OK":
-                raise RuntimeError(f"Unable to select mailbox {mailbox}")
-
-            status, data = client.uid("SEARCH", None, f"UID {last_uid + 1}:*")
-            if status != "OK":
-                raise RuntimeError("Unable to search mailbox")
-
-            highest_uid = last_uid
-            uid_list = [item.decode("utf-8") if isinstance(item, bytes) else str(item) for item in (data[0] or b"").split()]
-            for uid in uid_list:
-                status, fetched = client.uid("FETCH", uid, "(RFC822)")
+            state_changed = False
+            for mailbox in self.settings.imap_mailboxes:
+                last_uid = int(state.get(mailbox, 0) or 0)
+                status, _ = client.select(self._mailbox_select_name(mailbox))
                 if status != "OK":
-                    details.append(f"failed to fetch message uid={uid}")
+                    details.append(f"unable to select mailbox {mailbox}")
                     continue
 
-                raw_message = b""
-                for chunk in fetched:
-                    if isinstance(chunk, tuple) and len(chunk) >= 2:
-                        raw_message = chunk[1]
-                        break
-                if not raw_message:
-                    details.append(f"empty message uid={uid}")
+                status, data = client.uid("SEARCH", None, f"UID {last_uid + 1}:*")
+                if status != "OK":
+                    details.append(f"unable to search mailbox {mailbox}")
                     continue
 
-                message = BytesParser(policy=policy.default).parsebytes(raw_message)
-                from_address = parseaddr(message.get("Reply-To") or message.get("From") or "")[1].strip()
-                subject = _decode_subject(message.get("Subject"))
-                text = _extract_text_body(message)
-                connector_message_id = str(message.get("Message-ID") or f"imap:{mailbox}:{uid}").strip()
-                thread_key = str(message.get("In-Reply-To") or message.get("References") or connector_message_id).strip()
-                dedup_key = f"inbound:{connector_message_id}"
+                highest_uid = last_uid
+                uid_list = [
+                    item.decode("utf-8") if isinstance(item, bytes) else str(item)
+                    for item in (data[0] or b"").split()
+                ]
+                for uid in uid_list:
+                    status, fetched = client.uid("FETCH", uid, "(RFC822)")
+                    if status != "OK":
+                        details.append(f"failed to fetch message uid={uid} mailbox={mailbox}")
+                        continue
 
-                if self._delivery_exists(dedup_key, delivery_status=None):
-                    highest_uid = max(highest_uid, int(uid))
-                    continue
-                if not from_address:
-                    details.append(f"skipped uid={uid} without sender address")
-                    highest_uid = max(highest_uid, int(uid))
-                    continue
-                if self._is_self_address(from_address):
-                    details.append(f"skipped uid={uid} from self address {from_address}")
-                    highest_uid = max(highest_uid, int(uid))
-                    continue
+                    raw_message = b""
+                    for chunk in fetched:
+                        if isinstance(chunk, tuple) and len(chunk) >= 2:
+                            raw_message = chunk[1]
+                            break
+                    if not raw_message:
+                        details.append(f"empty message uid={uid} mailbox={mailbox}")
+                        continue
 
-                delivery_status = "received"
-                result: dict[str, Any] | Any
-                mode = "run"
-                try:
-                    result, mode = self.ingest_email(
+                    message = BytesParser(policy=policy.default).parsebytes(raw_message)
+                    from_address = parseaddr(message.get("Reply-To") or message.get("From") or "")[1].strip()
+                    subject = _decode_subject(message.get("Subject"))
+                    text = _extract_text_body(message)
+                    connector_message_id = str(message.get("Message-ID") or f"imap:{mailbox}:{uid}").strip()
+                    thread_key = str(message.get("In-Reply-To") or message.get("References") or connector_message_id).strip()
+                    dedup_key = f"inbound:{connector_message_id}"
+
+                    if self._delivery_exists(dedup_key, delivery_status=None):
+                        highest_uid = max(highest_uid, int(uid))
+                        continue
+                    if not from_address:
+                        details.append(f"skipped uid={uid} mailbox={mailbox} without sender address")
+                        highest_uid = max(highest_uid, int(uid))
+                        continue
+                    if self._is_self_address(from_address):
+                        details.append(f"skipped uid={uid} mailbox={mailbox} from self address {from_address}")
+                        highest_uid = max(highest_uid, int(uid))
+                        continue
+
+                    delivery_status = "received"
+                    result: dict[str, Any] | Any
+                    mode = "run"
+                    try:
+                        result, mode = self.ingest_email(
+                            {
+                                "from_address": from_address,
+                                "subject": subject,
+                                "text": text,
+                                "thread_key": thread_key,
+                                "connector_message_id": connector_message_id,
+                                "metadata": {
+                                    "uid": uid,
+                                    "mailbox": mailbox,
+                                    "to_address": parseaddr(message.get("To") or "")[1].strip(),
+                                },
+                            }
+                        )
+                    except Exception as exc:
+                        delivery_status = "failed"
+                        result = {"error": str(exc)}
+                        mode = "error"
+                        details.append(f"failed to process inbound email uid={uid} mailbox={mailbox}: {exc}")
+
+                    self.control_plane.create_delivery(
                         {
-                            "from_address": from_address,
-                            "subject": subject,
-                            "text": text,
+                            "connector": "email",
+                            "direction": "inbound",
+                            "message_type": "email_inbound",
+                            "delivery_status": delivery_status,
+                            "dedup_key": dedup_key,
                             "thread_key": thread_key,
-                            "connector_message_id": connector_message_id,
-                            "metadata": {
+                            "source_address": from_address,
+                            "target_address": parseaddr(message.get("To") or "")[1].strip(),
+                            "subject": subject,
+                            "payload": {
+                                "mode": mode,
+                                "connector_message_id": connector_message_id,
                                 "uid": uid,
                                 "mailbox": mailbox,
-                                "to_address": parseaddr(message.get("To") or "")[1].strip(),
+                                "result": result,
                             },
+                            "sent_at": utcnow().isoformat(),
                         }
                     )
-                except Exception as exc:
-                    delivery_status = "failed"
-                    result = {"error": str(exc)}
-                    mode = "error"
-                    details.append(f"failed to process inbound email uid={uid}: {exc}")
+                    highest_uid = max(highest_uid, int(uid))
+                    if delivery_status == "received":
+                        processed += 1
+                        details.append(f"processed inbound email uid={uid} mailbox={mailbox} mode={mode}")
 
-                self.control_plane.create_delivery(
-                    {
-                        "connector": "email",
-                        "direction": "inbound",
-                        "message_type": "email_inbound",
-                        "delivery_status": delivery_status,
-                        "dedup_key": dedup_key,
-                        "thread_key": thread_key,
-                        "source_address": from_address,
-                        "target_address": parseaddr(message.get("To") or "")[1].strip(),
-                        "subject": subject,
-                        "payload": {
-                            "mode": mode,
-                            "connector_message_id": connector_message_id,
-                            "uid": uid,
-                            "result": result,
-                        },
-                        "sent_at": utcnow().isoformat(),
-                    }
-                )
-                highest_uid = max(highest_uid, int(uid))
-                if delivery_status == "received":
-                    processed += 1
-                    details.append(f"processed inbound email uid={uid} mode={mode}")
+                if highest_uid > last_uid:
+                    state[mailbox] = highest_uid
+                    state_changed = True
 
-            if highest_uid > last_uid:
-                state[mailbox] = highest_uid
+            if state_changed:
                 self._write_state(state)
         finally:
             if client is not None:
@@ -599,6 +609,13 @@ class EmailConnectorService:
             json.dumps(state, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    @staticmethod
+    def _mailbox_select_name(mailbox: str) -> str:
+        value = str(mailbox or "").strip()
+        if " " in value and not (value.startswith('"') and value.endswith('"')):
+            return f'"{value}"'
+        return value or "INBOX"
 
     def _send_and_record(
         self,

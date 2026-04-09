@@ -42,6 +42,16 @@ class EmailConnectorSettings:
         self.imap_username = os.getenv("AGENT_EMAIL_IMAP_USERNAME", "").strip()
         self.imap_password = os.getenv("AGENT_EMAIL_IMAP_PASSWORD", "").strip()
         self.imap_use_ssl = _env_bool("AGENT_EMAIL_IMAP_USE_SSL", True)
-        self.imap_mailbox = os.getenv("AGENT_EMAIL_IMAP_MAILBOX", "INBOX").strip() or "INBOX"
+        raw_imap_mailboxes = os.getenv("AGENT_EMAIL_IMAP_MAILBOX", "INBOX,Junk Mail").strip()
+        mailbox_candidates = [
+            item.strip()
+            for item in raw_imap_mailboxes.split(",")
+            if item.strip()
+        ] or ["INBOX"]
+        for mailbox in ["INBOX", "Junk Mail"]:
+            if mailbox not in mailbox_candidates:
+                mailbox_candidates.append(mailbox)
+        self.imap_mailboxes = mailbox_candidates
+        self.imap_mailbox = self.imap_mailboxes[0]
         self.state_path = Path(os.getenv("AGENT_EMAIL_STATE_PATH", "agent_email_state/imap-state.json"))
         self.alert_lookback_hours = max(1, _env_int("AGENT_EMAIL_ALERT_LOOKBACK_HOURS", 24))
