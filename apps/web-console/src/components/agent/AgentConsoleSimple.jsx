@@ -109,7 +109,7 @@ function AgentConsoleSimple({ user }) {
         const [nextOverview, nextRuntime, nextSessions, nextApprovals, nextTasks, nextAlerts] = await Promise.all([
             agentApi.overview(),
             agentApi.runtimeStatus(),
-            agentApi.listSessions({ limit: 40, kind: 'command' }),
+            agentApi.listSessions({ limit: 40, kind: 'command', source: 'web' }),
             agentApi.listApprovals({ limit: 20 }),
             agentApi.listScheduledTasks({ limit: 20 }),
             agentApi.listAlerts({ limit: 20 }),
@@ -127,7 +127,7 @@ function AgentConsoleSimple({ user }) {
             if (current && orderedSessions.some((item) => item.id === current)) {
                 return current;
             }
-            return filteredSessions[0]?.id || orderedSessions[0]?.id || '';
+            return filteredSessions[0]?.id || '';
         });
     }, []);
 

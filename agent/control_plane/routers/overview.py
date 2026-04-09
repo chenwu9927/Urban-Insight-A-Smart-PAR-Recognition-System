@@ -15,6 +15,15 @@ router = APIRouter()
 OPERATOR_SESSION_SOURCES = ("web", "email", "manual")
 
 
+def _normalize_text(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if set(text) <= {"?"}:
+        return None
+    return text
+
+
 def _serialize_run(run: AgentRun, session: AgentSession | None, trigger_message: AgentMessage | None) -> dict:
     content = trigger_message.content if trigger_message else None
     text = ""
@@ -38,9 +47,9 @@ def _serialize_run(run: AgentRun, session: AgentSession | None, trigger_message:
         "schedule_mode": run.schedule_mode,
         "permission_mode": run.permission_mode,
         "session_id": run.session_id,
-        "session_title": session.title if session else None,
+        "session_title": _normalize_text(session.title) if session else None,
         "session_kind": session.kind if session else None,
-        "trigger_text": text or (trigger_message.text_preview if trigger_message else None),
+        "trigger_text": _normalize_text(text or (trigger_message.text_preview if trigger_message else None)),
         "result_summary": run.result_summary,
         "input_summary": input_summary,
         "claimed_by": run.claimed_by,
@@ -204,7 +213,7 @@ def get_agent_overview(
         "recent_sessions": [
             {
                 "id": session.id,
-                "title": session.title,
+                "title": _normalize_text(session.title),
                 "kind": session.kind,
                 "status": session.status,
                 "source": session.source,
