@@ -107,7 +107,7 @@ function Insights() {
             <section className="page-toolbar">
                 <div className="page-header-actions">
                     <button type="button" className="btn-primary" onClick={fetchInsights} disabled={loading}>
-                        {loading ? '更新中...' : '刷新研判'}
+                        {loading ? '更新中…' : '刷新研判'}
                     </button>
                 </div>
             </section>
@@ -220,7 +220,7 @@ function Insights() {
 
                         <div className="action-row">
                             <button type="button" className="btn-primary" onClick={askQuestion} disabled={askLoading || !question.trim()}>
-                                {askLoading ? '处理中...' : '提交问题'}
+                                {askLoading ? '处理中…' : '提交问题'}
                             </button>
                         </div>
 

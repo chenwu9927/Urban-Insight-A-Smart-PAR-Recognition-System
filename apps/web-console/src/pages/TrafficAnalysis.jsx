@@ -86,7 +86,7 @@ function TrafficAnalysis() {
             <section className="page-toolbar">
                 <div className="page-header-actions">
                     <button type="button" className="btn-primary" onClick={analyzeTraffic} disabled={!selectedFile || loading}>
-                        {loading ? '生成中...' : '刷新分析'}
+                        {loading ? '生成中…' : '刷新分析'}
                     </button>
                 </div>
             </section>
@@ -149,7 +149,7 @@ function TrafficAnalysis() {
                                     <XAxis dataKey="time" />
                                     <YAxis />
                                     <Tooltip />
-                                    <Area type="monotone" dataKey="count" stroke="#8f6b52" fill="#d9c4b1" fillOpacity={0.55} />
+                                    <Area type="monotone" dataKey="count" stroke="#4d4d4d" fill="#c9c9c9" fillOpacity={0.55} />
                                 </AreaChart>
                             </ResponsiveContainer>
                         </div>
@@ -209,7 +209,7 @@ function TrafficAnalysis() {
                 </>
             ) : selectedFile ? null : (
                 <section className="card">
-                    <div className="empty-state">先选文件。</div>
+                    <div className="empty-state">先选择一个文件。</div>
                 </section>
             )}
         </div>

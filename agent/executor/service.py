@@ -1294,14 +1294,19 @@ class ApiOnlyExecutionService:
         runtime_health = (loops.get("runtime") or {}).get("health") or "unknown"
         scheduler_health = (loops.get("scheduler") or {}).get("health") or "unknown"
         email_health = (loops.get("email") or {}).get("health") or "unknown"
-        active_runs = counts.get("active_runs", 0)
+        active_runs = max(int(counts.get("active_runs", 0) or 0) - 1, 0)
         queued_runs = counts.get("queued_runs", 0)
         open_alerts = len(alerts or [])
 
-        if any(keyword in normalized for keyword in ("正常", "状态", "工作", "运行", "在吗", "chat", "聊天")):
+        if any(keyword in normalized for keyword in ("正常", "状态", "工作", "运行", "在吗", "hi", "hello", "chat", "聊天", "你好", "您好", "？", "?")):
+            if open_alerts:
+                return (
+                    f"我在。当前执行循环 {runtime_health}，系统有 {open_alerts} 条活动告警，"
+                    f"排队任务 {queued_runs} 个。"
+                )
             return (
-                f"我现在可以正常工作。当前执行循环状态为 {runtime_health}，"
-                f"活跃任务 {active_runs} 个，排队任务 {queued_runs} 个，活动告警 {open_alerts} 条。"
+                f"我在。当前执行循环 {runtime_health}，调度循环 {scheduler_health}。"
+                + (f" 现在有 {queued_runs} 个排队任务。" if queued_runs else " 目前没有排队任务，也没有活动告警。")
             )
 
         if any(keyword in normalized for keyword in ("能做什么", "可以做什么", "功能", "capability")):
@@ -1316,10 +1321,13 @@ class ApiOnlyExecutionService:
                 f"执行循环 {runtime_health}，调度循环 {scheduler_health}，邮件循环 {email_health}。"
             )
 
-        return (
-            f"我已收到你的问题。当前执行循环 {runtime_health}，"
-            f"活跃任务 {active_runs} 个，活动告警 {open_alerts} 条。"
-        )
+        if open_alerts:
+            return f"我看到了你的问题。当前系统有 {open_alerts} 条活动告警，执行循环 {runtime_health}。"
+        if queued_runs:
+            return f"我看到了你的问题。当前执行循环 {runtime_health}，排队任务 {queued_runs} 个。"
+        if active_runs:
+            return f"我看到了你的问题。当前执行循环 {runtime_health}，还有 {active_runs} 个活跃任务在处理中。"
+        return "我看到了你的问题。当前系统运行正常，没有活动告警。"
 
     @staticmethod
     def _messages_end_with_prompt(messages: list[dict[str, Any]], prompt: str) -> bool:

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api, apiUrl } from '../lib/api';
+import { formatDateTime } from '../lib/time';
 
 const CLIP_LEAD_SECONDS = 2;
 const CLIP_LENGTH_SECONDS = 5;
@@ -48,19 +49,8 @@ const orientationLabels = {
     Back: '背面',
 };
 
-function formatDateTime(value) {
-    if (!value) return '--';
-    try {
-        return new Date(value).toLocaleString('zh-CN');
-    } catch {
-        return value;
-    }
-}
-
 function formatTime(seconds) {
-    if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
-        return '--:--';
-    }
+    if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return '--:--';
     const whole = Math.max(0, Math.floor(seconds));
     const minutes = Math.floor(whole / 60);
     const remain = whole % 60;
@@ -109,10 +99,8 @@ function Retrieval() {
         () => (Array.isArray(results) ? results.slice(0, MAX_RENDER_RESULTS) : []),
         [results],
     );
-    const isSearchDisabled =
-        loading ||
-        (mode === 'nl' && !nlQuery.trim()) ||
-        (mode === 'image' && !imageQueryFile);
+
+    const isSearchDisabled = loading || (mode === 'nl' && !nlQuery.trim()) || (mode === 'image' && !imageQueryFile);
 
     useEffect(() => {
         const loadFiles = async () => {
@@ -146,9 +134,8 @@ function Retrieval() {
     }, [activeClip]);
 
     const openClip = (item) => {
-        if (!item?.is_video || item?.snippet_info?.timestamp === undefined) {
-            return;
-        }
+        if (!item?.is_video || item?.snippet_info?.timestamp === undefined) return;
+
         const timestamp = Number(item.snippet_info.timestamp) || 0;
         const duration = item.duration ? Number(item.duration) : null;
         const clipStart = Math.max(0, timestamp - CLIP_LEAD_SECONDS);
@@ -168,9 +155,7 @@ function Retrieval() {
     };
 
     const handleClipReady = () => {
-        if (!videoRef.current || !activeClip) {
-            return;
-        }
+        if (!videoRef.current || !activeClip) return;
         const duration = videoRef.current.duration || activeClip.duration || 0;
         const startAt = Math.min(activeClip.clipStart, duration || activeClip.clipStart);
         videoRef.current.currentTime = startAt;
@@ -178,9 +163,7 @@ function Retrieval() {
     };
 
     const handleClipTimeUpdate = () => {
-        if (!videoRef.current || !activeClip) {
-            return;
-        }
+        if (!videoRef.current || !activeClip) return;
         if (videoRef.current.currentTime >= activeClip.clipEnd) {
             videoRef.current.pause();
         }
@@ -203,9 +186,7 @@ function Retrieval() {
                 };
 
                 Object.entries(payload).forEach(([key, value]) => {
-                    if (value === '' || value === 'All') {
-                        delete payload[key];
-                    }
+                    if (value === '' || value === 'All') delete payload[key];
                 });
 
                 if (!filters.has_backpack) delete payload.has_backpack;
@@ -259,7 +240,7 @@ function Retrieval() {
             <section className="page-toolbar">
                 <div className="page-header-actions">
                     <button type="button" className="btn-primary" onClick={handleSearch} disabled={isSearchDisabled}>
-                        {loading ? '检索中...' : '开始检索'}
+                        {loading ? '检索中…' : '开始检索'}
                     </button>
                 </div>
             </section>
@@ -458,8 +439,7 @@ function Retrieval() {
                                 <div>
                                     <h2 className="card-title">片段预览</h2>
                                     <div className="list-row-subtitle">
-                                        {activeClip.cameraLocation || '--'} ·{' '}
-                                        {activeClip.realTime || formatTime(activeClip.timestamp)}
+                                        {activeClip.cameraLocation || '--'} · {activeClip.realTime || formatTime(activeClip.timestamp)}
                                     </div>
                                 </div>
                             </div>
@@ -488,13 +468,8 @@ function Retrieval() {
                             ) : null}
                         </div>
 
-                        {!searched && !displayResults.length ? (
-                            <div className="empty-state">开始检索。</div>
-                        ) : null}
-
-                        {searched && !displayResults.length && !loading ? (
-                            <div className="empty-state">没有结果。</div>
-                        ) : null}
+                        {!searched && !displayResults.length ? <div className="empty-state">开始检索。</div> : null}
+                        {searched && !displayResults.length && !loading ? <div className="empty-state">没有结果。</div> : null}
 
                         <div className="list compact-list">
                             {displayResults.map((item, index) => {
@@ -504,13 +479,11 @@ function Retrieval() {
                                     <div key={`${item.record_id}-${index}`} className="list-row">
                                         <div className="list-row-main">
                                             <div className="list-row-title">
-                                                {translate(attributes.gender, genderLabels)} ·{' '}
-                                                {translate(attributes.age_group, ageGroupLabels)} ·{' '}
+                                                {translate(attributes.gender, genderLabels)} · {translate(attributes.age_group, ageGroupLabels)} ·{' '}
                                                 {translate(attributes.upper_color, colorLabels)}
                                             </div>
                                             <div className="list-row-subtitle">
-                                                {item.filename} · {item.camera_location || '--'} ·{' '}
-                                                {item.real_time || formatDateTime(item.upload_time)}
+                                                {item.filename} · {item.camera_location || '--'} · {item.real_time || formatDateTime(item.upload_time)}
                                             </div>
                                             {tags.length ? (
                                                 <div className="chip-row">

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { agentApi } from '../../lib/api';
+import { toTimestamp } from '../../lib/time';
 import {
     ACTIVE_POLL_INTERVAL_MS,
     POLL_INTERVAL_MS,
@@ -7,6 +8,7 @@ import {
     getMessageText,
     getSessionTitle,
     getSummaryText,
+    isPlaceholderTitle,
     isRunActive,
     sortSessions,
     translateAlertStatus,
@@ -21,6 +23,16 @@ import {
 
 const STREAM_STEP_MS = 18;
 const STREAM_CHARS_PER_TICK = 2;
+const PLACEHOLDER_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function shouldHideSession(item, selectedSessionId) {
+    if (!item) return true;
+    if (item.id === selectedSessionId) return false;
+    if (item.source !== 'web' || item.kind !== 'command') return true;
+    if (!isPlaceholderTitle(item.title)) return false;
+    const ageMs = Date.now() - toTimestamp(item.last_run_at || item.updated_at || 0);
+    return ageMs > PLACEHOLDER_SESSION_MAX_AGE_MS;
+}
 
 function AgentConsoleSimple({ user }) {
     const [overview, setOverview] = useState(null);
@@ -49,6 +61,11 @@ function AgentConsoleSimple({ user }) {
     const selectedSession = useMemo(
         () => sessions.find((item) => item.id === selectedSessionId) || null,
         [sessions, selectedSessionId],
+    );
+
+    const visibleSessions = useMemo(
+        () => sessions.filter((item) => !shouldHideSession(item, selectedSessionId)),
+        [selectedSessionId, sessions],
     );
 
     const activeSessionRun = useMemo(
@@ -92,13 +109,14 @@ function AgentConsoleSimple({ user }) {
         const [nextOverview, nextRuntime, nextSessions, nextApprovals, nextTasks, nextAlerts] = await Promise.all([
             agentApi.overview(),
             agentApi.runtimeStatus(),
-            agentApi.listSessions({ limit: 40 }),
+            agentApi.listSessions({ limit: 40, kind: 'command' }),
             agentApi.listApprovals({ limit: 20 }),
             agentApi.listScheduledTasks({ limit: 20 }),
             agentApi.listAlerts({ limit: 20 }),
         ]);
 
         const orderedSessions = sortSessions(nextSessions || []);
+        const filteredSessions = orderedSessions.filter((item) => !shouldHideSession(item, ''));
         setOverview(nextOverview || null);
         setRuntimeStatus(nextRuntime || null);
         setSessions(orderedSessions);
@@ -109,41 +127,41 @@ function AgentConsoleSimple({ user }) {
             if (current && orderedSessions.some((item) => item.id === current)) {
                 return current;
             }
-            return orderedSessions[0]?.id || '';
+            return filteredSessions[0]?.id || orderedSessions[0]?.id || '';
         });
     }, []);
 
-    const loadConversation = useCallback(
-        async (sessionId, { background = false } = {}) => {
-            if (!sessionId) {
+    const loadConversation = useCallback(async (sessionId, { background = false } = {}) => {
+        if (!sessionId) {
+            setMessages([]);
+            setSessionRuns([]);
+            setPendingRunId('');
+            return;
+        }
+        if (!background) setConversationLoading(true);
+        try {
+            const [nextMessages, nextRuns] = await Promise.all([
+                agentApi.listSessionMessages(sessionId, { limit: 80 }),
+                agentApi.listRuns({ session_id: sessionId, limit: 20 }),
+            ]);
+            setMessages(nextMessages || []);
+            setSessionRuns(nextRuns || []);
+            const nextPendingRun = (nextRuns || []).find((item) => isRunActive(item));
+            setPendingRunId(nextPendingRun?.id || '');
+        } catch (loadError) {
+            console.error('Failed to load conversation', loadError);
+            if (loadError?.response?.status === 404) {
+                setSelectedSessionId('');
                 setMessages([]);
                 setSessionRuns([]);
                 setPendingRunId('');
                 return;
             }
-            if (!background) {
-                setConversationLoading(true);
-            }
-            try {
-                const [nextMessages, nextRuns] = await Promise.all([
-                    agentApi.listSessionMessages(sessionId, { limit: 80 }),
-                    agentApi.listRuns({ session_id: sessionId, limit: 20 }),
-                ]);
-                setMessages(nextMessages || []);
-                setSessionRuns(nextRuns || []);
-                const nextPendingRun = (nextRuns || []).find((item) => isRunActive(item));
-                setPendingRunId(nextPendingRun?.id || '');
-            } catch (loadError) {
-                console.error('Failed to load conversation', loadError);
-                setError('会话内容加载失败。');
-            } finally {
-                if (!background) {
-                    setConversationLoading(false);
-                }
-            }
-        },
-        [],
-    );
+            setError('会话内容加载失败。');
+        } finally {
+            if (!background) setConversationLoading(false);
+        }
+    }, []);
 
     const refreshAll = useCallback(async () => {
         try {
@@ -337,7 +355,7 @@ function AgentConsoleSimple({ user }) {
                 <section className="card">
                     <div className="list-row-title">会话</div>
                     <div className="list compact-list" style={{ marginTop: 10 }}>
-                        {sessions.slice(0, 8).map((session) => (
+                        {visibleSessions.slice(0, 8).map((session) => (
                             <button
                                 key={session.id}
                                 type="button"
@@ -352,7 +370,7 @@ function AgentConsoleSimple({ user }) {
                                 </div>
                             </button>
                         ))}
-                        {!sessions.length ? <div className="empty-state">暂无会话。</div> : null}
+                        {!visibleSessions.length ? <div className="empty-state">暂无会话。</div> : null}
                     </div>
                     {selectedSession ? (
                         <div className="subsection compact-subsection">
@@ -462,7 +480,7 @@ function AgentConsoleSimple({ user }) {
                         }}
                     />
                     <div className="action-row">
-                        <span className="composer-tip">Ctrl/Cmd + Enter 发送</span>
+                        <span className="composer-tip">Ctrl / Cmd + Enter 发送</span>
                         <button type="button" className="btn-primary" onClick={handleSend} disabled={sending || !draft.trim()}>
                             {sending ? '发送中…' : '发送'}
                         </button>

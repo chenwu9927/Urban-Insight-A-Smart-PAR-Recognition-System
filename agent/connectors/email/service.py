@@ -5,6 +5,7 @@ import imaplib
 import json
 import re
 import smtplib
+import ssl
 import threading
 import time
 import uuid
@@ -109,6 +110,10 @@ def _extract_text_body(message) -> str:
     return str(payload or "").strip()
 
 
+def _normalize_email_address(value: str | None) -> str:
+    return str(value or "").strip().lower()
+
+
 class EmailDeliveryGateway:
     def __init__(self, settings: EmailConnectorSettings) -> None:
         self.settings = settings
@@ -142,9 +147,28 @@ class EmailDeliveryGateway:
         message["Subject"] = subject
         message.set_content(body)
 
-        with smtplib.SMTP(self.settings.smtp_host, self.settings.smtp_port, timeout=30) as server:
-            if self.settings.smtp_use_tls:
-                server.starttls()
+        smtp_context = (
+            ssl.create_default_context()
+            if self.settings.smtp_verify_certificate
+            else ssl._create_unverified_context()
+        )
+        if self.settings.smtp_use_ssl:
+            server = smtplib.SMTP_SSL(
+                self.settings.smtp_host,
+                self.settings.smtp_port,
+                timeout=30,
+                context=smtp_context,
+            )
+        else:
+            server = smtplib.SMTP(
+                self.settings.smtp_host,
+                self.settings.smtp_port,
+                timeout=30,
+            )
+
+        with server:
+            if not self.settings.smtp_use_ssl and self.settings.smtp_use_tls:
+                server.starttls(context=smtp_context)
             if self.settings.smtp_username:
                 server.login(self.settings.smtp_username, self.settings.smtp_password)
             server.send_message(message)
@@ -174,6 +198,17 @@ class EmailConnectorService:
 
     def close(self) -> None:
         self.control_plane.close()
+
+    def _is_self_address(self, value: str | None) -> bool:
+        address = _normalize_email_address(value)
+        if not address:
+            return False
+        known_addresses = {
+            _normalize_email_address(self.settings.default_from_address),
+            _normalize_email_address(self.settings.smtp_username),
+            _normalize_email_address(self.settings.imap_username),
+        }
+        return address in {item for item in known_addresses if item}
 
     def ingest_email(self, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
         subject = str(payload.get("subject") or "").strip()
@@ -327,34 +362,48 @@ class EmailConnectorService:
                 thread_key = str(message.get("In-Reply-To") or message.get("References") or connector_message_id).strip()
                 dedup_key = f"inbound:{connector_message_id}"
 
-                if self._delivery_exists(dedup_key, delivery_status="received"):
+                if self._delivery_exists(dedup_key, delivery_status=None):
                     highest_uid = max(highest_uid, int(uid))
                     continue
                 if not from_address:
                     details.append(f"skipped uid={uid} without sender address")
                     highest_uid = max(highest_uid, int(uid))
                     continue
+                if self._is_self_address(from_address):
+                    details.append(f"skipped uid={uid} from self address {from_address}")
+                    highest_uid = max(highest_uid, int(uid))
+                    continue
 
-                result, mode = self.ingest_email(
-                    {
-                        "from_address": from_address,
-                        "subject": subject,
-                        "text": text,
-                        "thread_key": thread_key,
-                        "connector_message_id": connector_message_id,
-                        "metadata": {
-                            "uid": uid,
-                            "mailbox": mailbox,
-                            "to_address": parseaddr(message.get("To") or "")[1].strip(),
-                        },
-                    }
-                )
+                delivery_status = "received"
+                result: dict[str, Any] | Any
+                mode = "run"
+                try:
+                    result, mode = self.ingest_email(
+                        {
+                            "from_address": from_address,
+                            "subject": subject,
+                            "text": text,
+                            "thread_key": thread_key,
+                            "connector_message_id": connector_message_id,
+                            "metadata": {
+                                "uid": uid,
+                                "mailbox": mailbox,
+                                "to_address": parseaddr(message.get("To") or "")[1].strip(),
+                            },
+                        }
+                    )
+                except Exception as exc:
+                    delivery_status = "failed"
+                    result = {"error": str(exc)}
+                    mode = "error"
+                    details.append(f"failed to process inbound email uid={uid}: {exc}")
+
                 self.control_plane.create_delivery(
                     {
                         "connector": "email",
                         "direction": "inbound",
                         "message_type": "email_inbound",
-                        "delivery_status": "received",
+                        "delivery_status": delivery_status,
                         "dedup_key": dedup_key,
                         "thread_key": thread_key,
                         "source_address": from_address,
@@ -370,8 +419,9 @@ class EmailConnectorService:
                     }
                 )
                 highest_uid = max(highest_uid, int(uid))
-                processed += 1
-                details.append(f"processed inbound email uid={uid} mode={mode}")
+                if delivery_status == "received":
+                    processed += 1
+                    details.append(f"processed inbound email uid={uid} mode={mode}")
 
             if highest_uid > last_uid:
                 state[mailbox] = highest_uid
@@ -388,7 +438,7 @@ class EmailConnectorService:
     def _process_runs(self, *, status: str) -> tuple[int, list[str]]:
         deliveries = 0
         details: list[str] = []
-        runs = self.control_plane.list_runs(status=status, limit=100)
+        runs = self.control_plane.list_runs(status=status, source="email", limit=100)
         for run in runs:
             session = self.control_plane.get_session(run["session_id"])
             email_meta = ((session.get("config_snapshot") or {}).get("email") or {})

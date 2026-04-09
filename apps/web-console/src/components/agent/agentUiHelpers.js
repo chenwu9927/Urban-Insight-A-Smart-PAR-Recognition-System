@@ -1,13 +1,14 @@
+import { formatDateTime, toTimestamp } from '../../lib/time';
+
+export { formatDateTime };
+
 export const POLL_INTERVAL_MS = 5000;
 export const ACTIVE_POLL_INTERVAL_MS = 1500;
 
-export function formatDateTime(value) {
-    if (!value) return '--';
-    try {
-        return new Date(value).toLocaleString('zh-CN');
-    } catch {
-        return value;
-    }
+export function isPlaceholderTitle(value) {
+    const text = String(value || '').trim();
+    if (!text) return true;
+    return /^[?\s]+$/.test(text);
 }
 
 export function getMessageText(message) {
@@ -25,7 +26,12 @@ export function getMessageText(message) {
 }
 
 export function getSessionTitle(session) {
-    return session?.title?.trim() || `会话 ${session?.id?.slice(0, 8) || ''}`;
+    const title = String(session?.title || '').trim();
+    if (!isPlaceholderTitle(title)) {
+        return title;
+    }
+    const suffix = session?.id?.slice(0, 8) || '';
+    return `未命名会话 ${suffix}`.trim();
 }
 
 export function getSummaryText(summary) {
@@ -40,8 +46,8 @@ export function getSummaryText(summary) {
 
 export function sortSessions(items) {
     return [...items].sort((left, right) => {
-        const leftValue = new Date(left.last_run_at || left.updated_at || 0).getTime();
-        const rightValue = new Date(right.last_run_at || right.updated_at || 0).getTime();
+        const leftValue = toTimestamp(left.last_run_at || left.updated_at || 0);
+        const rightValue = toTimestamp(right.last_run_at || right.updated_at || 0);
         return rightValue - leftValue;
     });
 }

@@ -197,7 +197,7 @@ function FileLibrary() {
             <section className="page-toolbar">
                 <div className="page-header-actions">
                     <button type="button" className="btn-primary" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-                        {uploading ? '上传中...' : '上传文件'}
+                        {uploading ? '上传中…' : '上传文件'}
                     </button>
                 </div>
             </section>
@@ -256,8 +256,7 @@ function FileLibrary() {
 
                 <section className="card">
                     <div className="list-row-title">文件</div>
-                    {loading ? <div className="empty-state">正在加载...</div> : null}
-
+                    {loading ? <div className="empty-state">正在加载…</div> : null}
                     {!loading ? (
                         <div className="list compact-list" style={{ marginTop: 10 }}>
                             {filesWithTasks.map((file) => {

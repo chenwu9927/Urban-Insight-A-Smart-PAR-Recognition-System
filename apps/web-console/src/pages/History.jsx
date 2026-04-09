@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
-
-function formatDateTime(value) {
-    if (!value) return '--';
-    try {
-        return new Date(value).toLocaleString('zh-CN');
-    } catch {
-        return value;
-    }
-}
+import { formatDateTime } from '../lib/time';
 
 function History() {
     const [records, setRecords] = useState([]);
@@ -94,7 +86,7 @@ function History() {
                 <section className="card">
                     <div className="card-header">
                         <div>
-                            <h2 className="card-title">记录列表</h2>
+                            <h2 className="card-title">分析记录</h2>
                         </div>
                     </div>
 
@@ -117,7 +109,7 @@ function History() {
                                 </div>
                             </div>
                         ))}
-                        {!records.length ? <div className="empty-state">暂无历史记录。</div> : null}
+                        {!records.length ? <div className="empty-state">暂无分析记录。</div> : null}
                     </div>
                 </section>
 
@@ -133,13 +125,13 @@ function History() {
                                 onClick={() => fetchReport(selectedId, { refresh: true })}
                                 disabled={reportLoading}
                             >
-                                {reportLoading ? '生成中...' : '重新生成'}
+                                {reportLoading ? '生成中…' : '重新生成'}
                             </button>
                         ) : null}
                     </div>
 
-                    {!selectedId ? <div className="empty-state">选择记录后查看。</div> : null}
-                    {reportLoading ? <div className="empty-state">正在生成报告...</div> : null}
+                    {!selectedId ? <div className="empty-state">选择一条记录后查看报告。</div> : null}
+                    {reportLoading ? <div className="empty-state">正在生成报告…</div> : null}
                     {reportError ? <div className="notice error">{reportError}</div> : null}
 
                     {!reportLoading && !reportError && report?.report ? (

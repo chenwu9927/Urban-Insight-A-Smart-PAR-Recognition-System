@@ -32,6 +32,7 @@ def call_chat_completions_json(
     system_prompt: str,
     user_payload: Dict[str, Any],
     temperature: float = 0.2,
+    timeout_s: int = 45,
 ) -> Dict[str, Any]:
     api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -56,7 +57,7 @@ def call_chat_completions_json(
             "Authorization": f"Bearer {api_key}",
         },
         payload=payload,
-        timeout_s=45,
+        timeout_s=timeout_s,
     )
     content = resp["choices"][0]["message"]["content"]
     return json.loads(content)
@@ -472,6 +473,7 @@ def generate_record_report(record_summary: Dict[str, Any], *, allow_llm: bool = 
             system_prompt=system_prompt,
             user_payload={"record_summary": record_summary},
             temperature=0.2,
+            timeout_s=12,
         )
         parsed.setdefault("summary", "")
         parsed.setdefault("key_findings", [])

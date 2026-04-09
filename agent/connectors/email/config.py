@@ -34,6 +34,8 @@ class EmailConnectorSettings:
         self.smtp_username = os.getenv("AGENT_EMAIL_SMTP_USERNAME", "").strip()
         self.smtp_password = os.getenv("AGENT_EMAIL_SMTP_PASSWORD", "").strip()
         self.smtp_use_tls = _env_bool("AGENT_EMAIL_SMTP_USE_TLS", True)
+        self.smtp_use_ssl = _env_bool("AGENT_EMAIL_SMTP_USE_SSL", False)
+        self.smtp_verify_certificate = _env_bool("AGENT_EMAIL_SMTP_VERIFY_CERTIFICATE", True)
         self.imap_enable = _env_bool("AGENT_EMAIL_IMAP_ENABLE", False)
         self.imap_host = os.getenv("AGENT_EMAIL_IMAP_HOST", "").strip()
         self.imap_port = _env_int("AGENT_EMAIL_IMAP_PORT", 993)
