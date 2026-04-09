@@ -52,6 +52,12 @@ class AnalysisRecord(Base):
     upload_time = Column(DateTime, default=datetime.datetime.utcnow, index=True)
     pedestrian_count = Column(Integer)
     results = Column(JSON)
+    pipeline = Column(String, default="classic_cv", index=True)
+    result_schema_version = Column(String, default="v1")
+    semantic_results = Column(JSON, nullable=True)
+    window_summaries = Column(JSON, nullable=True)
+    video_insights = Column(JSON, nullable=True)
+    pipeline_meta = Column(JSON, nullable=True)
     is_video = Column(Integer, default=0)
     duration = Column(Integer, default=0)
     camera_location = Column(String, default="Unknown")
@@ -63,6 +69,8 @@ class AnalysisTask(Base):
     id = Column(Integer, primary_key=True, index=True)
     file_id = Column(Integer, index=True)
     status = Column(String, default="queued")
+    pipeline = Column(String, default="classic_cv", index=True)
+    pipeline_config = Column(JSON, nullable=True)
     result_record_id = Column(Integer, nullable=True)
     error_message = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
@@ -127,6 +135,37 @@ def _ensure_agent_runtime_columns(connection) -> None:
         connection.execute(text(f"ALTER TABLE agent_runs ADD COLUMN {name} {sql_type}"))
 
 
+def _ensure_analysis_workflow_columns(connection) -> None:
+    inspector = inspect(connection)
+    tables = set(inspector.get_table_names())
+
+    if "analysis_tasks" in tables:
+        existing_columns = {column["name"] for column in inspector.get_columns("analysis_tasks")}
+        required_columns = {
+            "pipeline": "VARCHAR(64) DEFAULT 'classic_cv'",
+            "pipeline_config": "JSON",
+        }
+        for name, sql_type in required_columns.items():
+            if name in existing_columns:
+                continue
+            connection.execute(text(f"ALTER TABLE analysis_tasks ADD COLUMN {name} {sql_type}"))
+
+    if "analysis_records" in tables:
+        existing_columns = {column["name"] for column in inspector.get_columns("analysis_records")}
+        required_columns = {
+            "pipeline": "VARCHAR(64) DEFAULT 'classic_cv'",
+            "result_schema_version": "VARCHAR(32) DEFAULT 'v1'",
+            "semantic_results": "JSON",
+            "window_summaries": "JSON",
+            "video_insights": "JSON",
+            "pipeline_meta": "JSON",
+        }
+        for name, sql_type in required_columns.items():
+            if name in existing_columns:
+                continue
+            connection.execute(text(f"ALTER TABLE analysis_records ADD COLUMN {name} {sql_type}"))
+
+
 def _ensure_default_admin(db_session) -> None:
     admin = db_session.query(User).filter(User.username == "admin").first()
     if admin:
@@ -155,6 +194,7 @@ def init_db():
             try:
                 Base.metadata.create_all(bind=connection)
                 _ensure_agent_runtime_columns(connection)
+                _ensure_analysis_workflow_columns(connection)
                 locked_session = sessionmaker(
                     autocommit=False,
                     autoflush=False,
@@ -175,6 +215,7 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     with engine.begin() as connection:
         _ensure_agent_runtime_columns(connection)
+        _ensure_analysis_workflow_columns(connection)
     db = SessionLocal()
     try:
         _ensure_default_admin(db)

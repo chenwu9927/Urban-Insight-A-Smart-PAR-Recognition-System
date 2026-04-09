@@ -13,11 +13,22 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
 class SchedulerSettings:
     def __init__(self) -> None:
         self.control_plane_url = os.getenv("AGENT_CONTROL_PLANE_URL", "http://agent-control-plane:8000").rstrip("/")
         self.poll_seconds = max(2, _env_int("AGENT_SCHEDULER_POLL_SECONDS", 10))
         self.dispatch_limit = max(1, _env_int("AGENT_SCHEDULER_DISPATCH_LIMIT", 20))
+        self.enable_dispatch = _env_bool("AGENT_SCHEDULER_ENABLE_DISPATCH", True)
+        self.enable_goal_sweep = _env_bool("AGENT_SCHEDULER_ENABLE_GOAL_SWEEP", True)
+        self.enable_memory_boost = _env_bool("AGENT_SCHEDULER_ENABLE_MEMORY_BOOST", True)
+        self.enable_proactive_goals = _env_bool("AGENT_SCHEDULER_ENABLE_PROACTIVE_GOALS", True)
         self.goal_sweep_limit = max(1, _env_int("AGENT_GOAL_SWEEP_LIMIT", 20))
         self.goal_verification_cooldown_minutes = max(1, _env_int("AGENT_GOAL_VERIFICATION_COOLDOWN_MINUTES", 10))
         self.goal_recovery_minutes = max(15, _env_int("AGENT_GOAL_RECOVERY_MINUTES", 180))
@@ -33,7 +44,9 @@ class SchedulerSettings:
         except ValueError:
             self.proactive_goal_min_distilled_confidence = 0.55
         self.proactive_goal_ttl_seconds = max(300, _env_int("AGENT_PROACTIVE_GOAL_TTL_SECONDS", 21600))
-        self.proactive_goal_priority_dispatch_enabled = os.getenv("AGENT_PROACTIVE_GOAL_PRIORITY_DISPATCH_ENABLED", "1").strip() not in {"0", "false", "False"}
+        self.proactive_goal_priority_dispatch_enabled = _env_bool("AGENT_PROACTIVE_GOAL_PRIORITY_DISPATCH_ENABLED", True)
+        self.enable_priority_dispatch = _env_bool("AGENT_SCHEDULER_ENABLE_PRIORITY_DISPATCH", True)
         self.proactive_goal_priority_dispatch_limit = max(1, _env_int("AGENT_PROACTIVE_GOAL_PRIORITY_DISPATCH_LIMIT", 10))
-        self.proactive_goal_feedback_sweep_enabled = os.getenv("AGENT_PROACTIVE_GOAL_FEEDBACK_SWEEP_ENABLED", "1").strip() not in {"0", "false", "False"}
+        self.proactive_goal_feedback_sweep_enabled = _env_bool("AGENT_PROACTIVE_GOAL_FEEDBACK_SWEEP_ENABLED", True)
+        self.enable_feedback_sweep = _env_bool("AGENT_SCHEDULER_ENABLE_FEEDBACK_SWEEP", True)
         self.proactive_goal_feedback_sweep_limit = max(1, _env_int("AGENT_PROACTIVE_GOAL_FEEDBACK_SWEEP_LIMIT", 10))

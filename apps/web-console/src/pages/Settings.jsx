@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 
+function formatDateTime(value) {
+    if (!value) return '--';
+    try {
+        return new Date(value).toLocaleString('zh-CN');
+    } catch {
+        return value;
+    }
+}
+
 function Settings({ user, onLogout }) {
     const [users, setUsers] = useState([]);
     const [showAddUser, setShowAddUser] = useState(false);
@@ -72,7 +81,7 @@ function Settings({ user, onLogout }) {
     };
 
     const handleDeleteUser = async (id) => {
-        if (!window.confirm('确定删除该用户吗？')) {
+        if (!window.confirm('确定删除这个用户吗？')) {
             return;
         }
         try {
@@ -81,12 +90,6 @@ function Settings({ user, onLogout }) {
         } catch (error) {
             window.alert(error.response?.data?.detail || '删除用户失败。');
         }
-    };
-
-    const handleLogout = () => {
-        localStorage.removeItem('user');
-        localStorage.removeItem('token');
-        onLogout();
     };
 
     const handleSaveLLMConfig = async () => {
@@ -141,14 +144,15 @@ function Settings({ user, onLogout }) {
         }
     };
 
+    const handleLogout = () => {
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
+        onLogout();
+    };
+
     return (
         <div className="page-shell">
-            <section className="page-header">
-                <div className="page-title-group">
-                    <span>设置</span>
-                    <h1>系统设置</h1>
-                    <p>管理当前账号、模型配置和用户列表。</p>
-                </div>
+            <section className="page-toolbar">
                 <div className="page-header-actions">
                     <button type="button" className="btn-secondary" onClick={handleLogout}>
                         退出登录
@@ -163,7 +167,7 @@ function Settings({ user, onLogout }) {
                             <h2 className="card-title">当前账号</h2>
                         </div>
                     </div>
-                    <div className="list">
+                    <div className="list compact-list">
                         <div className="list-row">
                             <div className="list-row-main">
                                 <div className="list-row-title">{user?.username}</div>
@@ -182,7 +186,7 @@ function Settings({ user, onLogout }) {
                             <h2 className="card-title">模型状态</h2>
                         </div>
                     </div>
-                    <div className="list">
+                    <div className="list compact-list">
                         <div className="list-row">
                             <div className="list-row-main">
                                 <div className="list-row-title">Base URL</div>
@@ -208,11 +212,10 @@ function Settings({ user, onLogout }) {
                 <div className="card-header">
                     <div>
                         <h2 className="card-title">模型配置</h2>
-                        <p className="card-subtitle">兼容 OpenAI API 格式，可直接接入 LongCat。</p>
                     </div>
                 </div>
 
-                {!llmConfigLoaded ? <div className="empty-state">正在加载配置...</div> : null}
+                {!llmConfigLoaded ? <div className="empty-state">正在加载...</div> : null}
 
                 {llmConfigLoaded ? (
                     <>
@@ -226,7 +229,6 @@ function Settings({ user, onLogout }) {
                                     placeholder={llmApiKeySet ? `当前：${llmApiKeyPreview}` : '请输入新的 API Key'}
                                 />
                             </label>
-
                             <label className="field">
                                 <span>Base URL</span>
                                 <input
@@ -235,9 +237,8 @@ function Settings({ user, onLogout }) {
                                     onChange={(event) => setLlmConfig((current) => ({ ...current, baseUrl: event.target.value }))}
                                 />
                             </label>
-
                             <label className="field">
-                                <span>模型名</span>
+                                <span>模型名称</span>
                                 <input
                                     type="text"
                                     value={llmConfig.model}
@@ -250,7 +251,12 @@ function Settings({ user, onLogout }) {
                             <button type="button" className="btn-primary" onClick={handleSaveLLMConfig} disabled={llmSaving}>
                                 {llmSaving ? '保存中...' : '保存配置'}
                             </button>
-                            <button type="button" className="btn-secondary" onClick={handleTestLLMConnection} disabled={llmTesting || !llmApiKeySet}>
+                            <button
+                                type="button"
+                                className="btn-secondary"
+                                onClick={handleTestLLMConnection}
+                                disabled={llmTesting || !llmApiKeySet}
+                            >
                                 {llmTesting ? '测试中...' : '测试连接'}
                             </button>
                             {llmApiKeySet ? (
@@ -273,7 +279,6 @@ function Settings({ user, onLogout }) {
                     <div className="card-header">
                         <div>
                             <h2 className="card-title">用户管理</h2>
-                            <p className="card-subtitle">增删平台用户。</p>
                         </div>
                         <button type="button" className="btn-primary" onClick={() => setShowAddUser((current) => !current)}>
                             {showAddUser ? '收起表单' : '新增用户'}
@@ -289,7 +294,12 @@ function Settings({ user, onLogout }) {
                                 </label>
                                 <label className="field">
                                     <span>密码</span>
-                                    <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required />
+                                    <input
+                                        type="password"
+                                        value={newPassword}
+                                        onChange={(event) => setNewPassword(event.target.value)}
+                                        required
+                                    />
                                 </label>
                                 <label className="field">
                                     <span>角色</span>
@@ -300,43 +310,40 @@ function Settings({ user, onLogout }) {
                                 </label>
                             </div>
                             <div className="action-row">
-                                <button type="submit" className="btn-primary">创建用户</button>
-                                <button type="button" className="btn-secondary" onClick={() => setShowAddUser(false)}>取消</button>
+                                <button type="submit" className="btn-primary">
+                                    创建用户
+                                </button>
+                                <button type="button" className="btn-secondary" onClick={() => setShowAddUser(false)}>
+                                    取消
+                                </button>
                             </div>
                         </form>
                     ) : null}
 
-                    <div className="table-wrap">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>用户名</th>
-                                    <th>角色</th>
-                                    <th>创建时间</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {users.map((entry) => (
-                                    <tr key={entry.id}>
-                                        <td>#{entry.id}</td>
-                                        <td>{entry.username}</td>
-                                        <td>{entry.role === 'admin' ? '管理员' : '普通用户'}</td>
-                                        <td>{new Date(entry.created_at).toLocaleString('zh-CN')}</td>
-                                        <td>
-                                            {entry.username !== 'admin' ? (
-                                                <button type="button" className="btn-ghost danger" onClick={() => handleDeleteUser(entry.id)}>
-                                                    删除
-                                                </button>
-                                            ) : (
-                                                <span className="status-tag is-info">默认管理员</span>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                    <div className="list compact-list">
+                        {users.map((entry) => (
+                            <div key={entry.id} className="list-row">
+                                <div className="list-row-main">
+                                    <div className="list-row-title">{entry.username}</div>
+                                    <div className="list-row-subtitle">{formatDateTime(entry.created_at)}</div>
+                                </div>
+                                <div className="list-row-meta">
+                                    <span className="status-tag is-info">{entry.role === 'admin' ? '管理员' : '普通用户'}</span>
+                                    {entry.username !== 'admin' ? (
+                                        <button
+                                            type="button"
+                                            className="btn-ghost danger"
+                                            onClick={() => handleDeleteUser(entry.id)}
+                                        >
+                                            删除
+                                        </button>
+                                    ) : (
+                                        <span className="page-chip">默认管理员</span>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                        {!users.length ? <div className="empty-state">暂无用户。</div> : null}
                     </div>
                 </section>
             ) : null}

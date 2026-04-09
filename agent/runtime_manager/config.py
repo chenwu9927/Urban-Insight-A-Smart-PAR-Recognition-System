@@ -34,5 +34,5 @@ class RuntimeManagerSettings:
         self.lease_seconds = max(5, _env_int("AGENT_RUNTIME_LEASE_SECONDS", 60))
         self.heartbeat_seconds = max(2, _env_int("AGENT_RUNTIME_HEARTBEAT_SECONDS", 15))
         self.poll_seconds = max(1, _env_int("AGENT_RUNTIME_POLL_SECONDS", 3))
-        self.timeout_seconds = max(5, _env_int("AGENT_RUNTIME_TIMEOUT_SECONDS", 30))
+        self.timeout_seconds = max(5, _env_int("AGENT_RUNTIME_TIMEOUT_SECONDS", 120))
         self.schedule_modes = _env_list("AGENT_RUNTIME_SCHEDULE_MODES")

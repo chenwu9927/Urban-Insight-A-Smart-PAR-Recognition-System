@@ -17,6 +17,24 @@ from backend.database import get_db
 router = APIRouter()
 
 
+def _serialize_session_summary(session: AgentSession) -> AgentSessionResponse:
+    return AgentSessionResponse(
+        id=session.id,
+        kind=session.kind,
+        title=session.title,
+        status=session.status,
+        owner_user_id=session.owner_user_id,
+        site_id=session.site_id,
+        camera_id=session.camera_id,
+        source=session.source,
+        config_snapshot=None,
+        state_patch=None,
+        last_run_at=session.last_run_at,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+    )
+
+
 @router.get("/agent/sessions", response_model=list[AgentSessionResponse])
 def list_sessions(
     kind: str | None = None,
@@ -35,7 +53,8 @@ def list_sessions(
         query = query.filter(AgentSession.site_id == site_id)
     if camera_id:
         query = query.filter(AgentSession.camera_id == camera_id)
-    return query.order_by(AgentSession.created_at.desc()).limit(limit).all()
+    sessions = query.order_by(AgentSession.created_at.desc()).limit(limit).all()
+    return [_serialize_session_summary(session) for session in sessions]
 
 
 @router.post("/agent/sessions", response_model=AgentSessionResponse)

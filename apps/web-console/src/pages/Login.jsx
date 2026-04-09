@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { AlertCircle, Lock, LogIn, ShieldCheck, User } from 'lucide-react';
 import { api } from '../lib/api';
 
-const Login = ({ onLogin }) => {
+function Login({ onLogin }) {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
@@ -35,9 +35,9 @@ const Login = ({ onLogin }) => {
                         <ShieldCheck size={30} />
                     </div>
                     <div>
-                        <span className="auth-caption">城市洞察</span>
+                        <span className="auth-caption">Urban Insight</span>
                         <h1>登录工作台</h1>
-                        <p>登录后可以访问文件库、检索、客流分析、洞察简报和常驻智能体。</p>
+                        <p>登录后进入统一工作台，查看任务、检索、趋势、研判和智能体状态。</p>
                     </div>
                 </div>
 
@@ -85,6 +85,6 @@ const Login = ({ onLogin }) => {
             </div>
         </div>
     );
-};
+}
 
 export default Login;

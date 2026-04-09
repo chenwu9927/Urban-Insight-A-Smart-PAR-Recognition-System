@@ -18,6 +18,14 @@ def _serialize_run(run: AgentRun, session: AgentSession | None, trigger_message:
     text = ""
     if isinstance(content, dict):
         text = str(content.get("text") or "").strip()
+    input_payload = run.input_payload if isinstance(run.input_payload, dict) else {}
+    params = input_payload.get("params") if isinstance(input_payload.get("params"), dict) else {}
+    input_summary = {
+        "action": str(input_payload.get("action") or "").strip() or None,
+        "question": str(params.get("question") or params.get("query") or "").strip()[:240] or None,
+        "record_id": params.get("record_id"),
+        "task_id": params.get("task_id"),
+    }
     return {
         "id": run.id,
         "status": run.status,
@@ -32,7 +40,7 @@ def _serialize_run(run: AgentRun, session: AgentSession | None, trigger_message:
         "session_kind": session.kind if session else None,
         "trigger_text": text or (trigger_message.text_preview if trigger_message else None),
         "result_summary": run.result_summary,
-        "input_payload": run.input_payload,
+        "input_summary": input_summary,
         "claimed_by": run.claimed_by,
         "last_error": run.last_error,
         "scheduled_at": run.scheduled_at.isoformat() if run.scheduled_at else None,

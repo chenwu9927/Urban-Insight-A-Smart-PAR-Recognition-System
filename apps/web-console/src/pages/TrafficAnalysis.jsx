@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api } from '../lib/api';
@@ -7,6 +7,7 @@ function translateGenderLabel(value) {
     const mapping = {
         Male: '男',
         Female: '女',
+        Unknown: '未知',
     };
     return mapping[value] || value || '--';
 }
@@ -18,6 +19,7 @@ function translateAgeLabel(value) {
         Young: '青年',
         Adult: '成人',
         Old: '老年',
+        Unknown: '未知',
     };
     return mapping[value] || value || '--';
 }
@@ -25,10 +27,10 @@ function translateAgeLabel(value) {
 function TrafficAnalysis() {
     const location = useLocation();
     const [files, setFiles] = useState([]);
-    const [selectedFile, setSelectedFile] = useState(location.state?.fileId || '');
-    const [loading, setLoading] = useState(false);
-    const [stats, setStats] = useState(null);
+    const [selectedFile, setSelectedFile] = useState(location.state?.fileId ? String(location.state.fileId) : '');
     const [interval, setInterval] = useState(5);
+    const [stats, setStats] = useState(null);
+    const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
     useEffect(() => {
@@ -38,7 +40,7 @@ function TrafficAnalysis() {
                 setFiles((response.data || []).filter((file) => file.status === 'analyzed'));
             } catch (loadError) {
                 console.error('Failed to fetch files', loadError);
-                setError('已分析文件列表加载失败。');
+                setError('分析文件列表加载失败。');
             }
         };
         void fetchFiles();
@@ -52,7 +54,7 @@ function TrafficAnalysis() {
         setError('');
         try {
             const response = await api.get(`/stats?file_id=${selectedFile}&interval=${interval}`);
-            setStats(response.data);
+            setStats(response.data || null);
         } catch (loadError) {
             console.error('Failed to analyze traffic', loadError);
             setError('客流分析请求失败。');
@@ -67,17 +69,24 @@ function TrafficAnalysis() {
         }
     }, [analyzeTraffic, selectedFile]);
 
+    const peakPoint = useMemo(() => {
+        const trend = stats?.traffic_trend || [];
+        if (!trend.length) return null;
+        return trend.reduce((best, item) => (item.count > (best?.count ?? -1) ? item : best), null);
+    }, [stats]);
+
+    const summaryItems = [
+        { label: '总人数', value: stats?.total_pedestrians ?? '--' },
+        { label: '时间粒度', value: stats?.interval_minutes ? `${stats.interval_minutes} 分钟` : '--' },
+        { label: '存储占用', value: stats?.storage_used ?? '--' },
+    ];
+
     return (
         <div className="page-shell">
-            <section className="page-header">
-                <div className="page-title-group">
-                    <span>分析</span>
-                    <h1>客流分析</h1>
-                    <p>选择一个已经分析完成的文件，按时间粒度查看人数变化和结构分布。</p>
-                </div>
+            <section className="page-toolbar">
                 <div className="page-header-actions">
                     <button type="button" className="btn-primary" onClick={analyzeTraffic} disabled={!selectedFile || loading}>
-                        {loading ? '生成中...' : '生成报告'}
+                        {loading ? '生成中...' : '刷新分析'}
                     </button>
                 </div>
             </section>
@@ -99,7 +108,7 @@ function TrafficAnalysis() {
                     </label>
 
                     <label className="field">
-                        <span>统计间隔</span>
+                        <span>统计粒度</span>
                         <select value={interval} onChange={(event) => setInterval(Number(event.target.value))}>
                             <option value={1}>1 分钟</option>
                             <option value={5}>5 分钟</option>
@@ -112,11 +121,25 @@ function TrafficAnalysis() {
 
             {stats ? (
                 <>
+                    <section className="card subtle-card compact-card">
+                        <div className="compact-summary">
+                            {summaryItems.map((item) => (
+                                <div key={item.label} className="compact-metric">
+                                    <span>{item.label}</span>
+                                    <strong>{item.value}</strong>
+                                </div>
+                            ))}
+                            <div className="compact-metric is-muted">
+                                <span>峰值时段</span>
+                                <strong>{peakPoint ? `${peakPoint.time} · ${peakPoint.count}` : '--'}</strong>
+                            </div>
+                        </div>
+                    </section>
+
                     <section className="card">
                         <div className="card-header">
                             <div>
                                 <h2 className="card-title">人数趋势</h2>
-                                <p className="card-subtitle">查看不同时间段的人流变化。</p>
                             </div>
                         </div>
                         <div className="chart-box">
@@ -137,21 +160,24 @@ function TrafficAnalysis() {
                             <div className="card-header">
                                 <div>
                                     <h2 className="card-title">性别分布</h2>
-                                    <p className="card-subtitle">基于当前文件的识别结果。</p>
                                 </div>
                             </div>
                             <div className="meter-list">
-                                {Object.entries(stats.gender_distribution || {}).map(([key, value]) => (
-                                    <div key={key} className="meter-row">
-                                        <div className="meter-row-head">
-                                            <span>{translateGenderLabel(key)}</span>
-                                            <strong>{value}%</strong>
+                                {Object.entries(stats.gender_distribution || {}).length ? (
+                                    Object.entries(stats.gender_distribution || {}).map(([key, value]) => (
+                                        <div key={key} className="meter-row">
+                                            <div className="meter-row-head">
+                                                <span>{translateGenderLabel(key)}</span>
+                                                <strong>{value}%</strong>
+                                            </div>
+                                            <div className="meter-track">
+                                                <div className="meter-fill" style={{ width: `${value}%` }} />
+                                            </div>
                                         </div>
-                                        <div className="meter-track">
-                                            <div className="meter-fill" style={{ width: `${value}%` }} />
-                                        </div>
-                                    </div>
-                                ))}
+                                    ))
+                                ) : (
+                                    <div className="empty-state compact">暂无数据。</div>
+                                )}
                             </div>
                         </section>
 
@@ -159,26 +185,33 @@ function TrafficAnalysis() {
                             <div className="card-header">
                                 <div>
                                     <h2 className="card-title">年龄分布</h2>
-                                    <p className="card-subtitle">按年龄段汇总占比。</p>
                                 </div>
                             </div>
                             <div className="meter-list">
-                                {Object.entries(stats.age_distribution || {}).map(([key, value]) => (
-                                    <div key={key} className="meter-row">
-                                        <div className="meter-row-head">
-                                            <span>{translateAgeLabel(key)}</span>
-                                            <strong>{value}%</strong>
+                                {Object.entries(stats.age_distribution || {}).length ? (
+                                    Object.entries(stats.age_distribution || {}).map(([key, value]) => (
+                                        <div key={key} className="meter-row">
+                                            <div className="meter-row-head">
+                                                <span>{translateAgeLabel(key)}</span>
+                                                <strong>{value}%</strong>
+                                            </div>
+                                            <div className="meter-track">
+                                                <div className="meter-fill alt" style={{ width: `${value}%` }} />
+                                            </div>
                                         </div>
-                                        <div className="meter-track">
-                                            <div className="meter-fill alt" style={{ width: `${value}%` }} />
-                                        </div>
-                                    </div>
-                                ))}
+                                    ))
+                                ) : (
+                                    <div className="empty-state compact">暂无数据。</div>
+                                )}
                             </div>
                         </section>
                     </div>
                 </>
-            ) : null}
+            ) : selectedFile ? null : (
+                <section className="card">
+                    <div className="empty-state">先选文件。</div>
+                </section>
+            )}
         </div>
     );
 }

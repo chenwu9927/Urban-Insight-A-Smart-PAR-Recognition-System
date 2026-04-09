@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AgentSessionCreate(BaseModel):
@@ -52,6 +52,15 @@ class AgentMessageCreate(BaseModel):
     connector_message_id: Optional[str] = None
     thread_key: Optional[str] = None
 
+    @field_validator("content", mode="before")
+    @classmethod
+    def normalize_content(cls, value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if value is None:
+            return {"text": ""}
+        return {"text": str(value)}
+
 
 class AgentMessageResponse(BaseModel):
     id: str
@@ -71,6 +80,8 @@ class AgentMessageResponse(BaseModel):
 
 class AgentRunCreate(BaseModel):
     session_id: str
+    action: Optional[str] = None
+    params: Optional[dict[str, Any]] = None
     trigger_message_id: Optional[str] = None
     parent_run_id: Optional[str] = None
     goal_key: Optional[str] = None

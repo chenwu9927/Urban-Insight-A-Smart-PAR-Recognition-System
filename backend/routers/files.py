@@ -16,9 +16,9 @@ import datetime
 
 router = APIRouter()
 
-UPLOAD_DIR = "uploads"
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-THUMBNAIL_DIR = "thumbnails"
+THUMBNAIL_DIR = os.getenv("THUMBNAIL_DIR", "thumbnails")
 os.makedirs(THUMBNAIL_DIR, exist_ok=True)
 
 class MediaFileResponse(BaseModel):
@@ -40,7 +40,7 @@ async def upload_file(
     start_time: Optional[str] = Form(None, description="视频开始时间，格式：YYYY-MM-DDTHH:MM"),
     db: Session = Depends(get_db)
 ):
-    file_location = f"{UPLOAD_DIR}/{file.filename}"
+    file_location = os.path.join(UPLOAD_DIR, file.filename)
     with open(file_location, "wb+") as file_object:
         shutil.copyfileobj(file.file, file_object)
     

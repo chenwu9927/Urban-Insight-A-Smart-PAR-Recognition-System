@@ -101,6 +101,7 @@ class AgentContextBuilder:
                 "3. Use memory carefully: daily notes for observations, long-term memory only for durable facts or explicit instructions.",
                 "4. Stay grounded in tool outputs and known platform state. If evidence is missing, say so explicitly.",
                 "5. Keep answers concise, concrete, and operationally useful.",
+                "6. When video-level semantic analysis is available, prefer reading semantic timelines and video insights before making high-level judgments about behavior or risk.",
                 "",
                 "## Available Tools",
                 *tool_lines,

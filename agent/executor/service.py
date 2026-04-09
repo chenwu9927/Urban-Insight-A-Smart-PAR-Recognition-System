@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import os
 import time
 from typing import Any
 
@@ -104,17 +105,20 @@ class ApiOnlyExecutionService:
             claim=claim,
             strategic_context=strategic_context,
         )
-        writeback = self.memory_writeback.apply(
-            action=action,
-            params=params,
-            output_payload=output_payload.get("data") if action != "agent.chat" else output_payload.get("data") or {},
-            result_summary=result_summary,
-            session_id=session_id,
-            run_id=run_id,
-            long_term_extractor=self._llm_extract_long_term_fact if self.tool_loop.llm_client.is_configured() else None,
-        )
-        if any(writeback.values()):
-            output_payload["memory_writeback"] = writeback
+        try:
+            writeback = self.memory_writeback.apply(
+                action=action,
+                params=params,
+                output_payload=output_payload.get("data") if action != "agent.chat" else output_payload.get("data") or {},
+                result_summary=result_summary,
+                session_id=session_id,
+                run_id=run_id,
+                long_term_extractor=self._llm_extract_long_term_fact if self.tool_loop.llm_client.is_configured() else None,
+            )
+            if any(writeback.values()):
+                output_payload["memory_writeback"] = writeback
+        except Exception as exc:
+            output_payload["memory_writeback_error"] = str(exc)
         return output_payload, result_summary
 
     def _execute_action_with_retry(
@@ -267,6 +271,20 @@ class ApiOnlyExecutionService:
             data = self._get(f"{self.settings.analysis_service_url}/analyze/tasks/{task_id}")
             return self._wrap(action, prompt, params, data, strategic_context=strategic_context), "Fetched analysis task successfully"
 
+        if action == "analysis.get_record":
+            record_id = params.get("record_id")
+            if not record_id:
+                raise ValueError("analysis.get_record requires params.record_id")
+            data = self._get(f"{self.settings.analysis_service_url}/analysis/records/{record_id}")
+            return self._wrap(action, prompt, params, {"record": data}, strategic_context=strategic_context), "Fetched analysis record successfully"
+
+        if action == "analysis.get_semantic_record":
+            record_id = params.get("record_id")
+            if not record_id:
+                raise ValueError("analysis.get_semantic_record requires params.record_id")
+            data = self._get(f"{self.settings.analysis_service_url}/analysis/records/{record_id}/semantic")
+            return self._wrap(action, prompt, params, data, strategic_context=strategic_context), "Fetched semantic analysis successfully"
+
         if action == "agent.chat":
             data, result_summary = self._run_agent_chat(prompt=prompt, params=params, claim=claim or {})
             return self._wrap(action, prompt, params, data, strategic_context=strategic_context), result_summary
@@ -373,13 +391,14 @@ class ApiOnlyExecutionService:
         system_prompt = str(messages[0].get("content") or "")
         conversation_messages = messages[1:]
 
-        if not self.tool_loop.llm_client.is_configured():
+        session_source = str((session or {}).get("source") or "").strip().lower() if isinstance(session, dict) else ""
+        if session_source == "web" or self._should_force_chat_fallback() or not self.tool_loop.llm_client.is_configured():
             fallback_output, fallback_summary = self._run_agent_chat_fallback(
                 question=question,
                 session_id=session_id,
                 strategic_context=strategic_context,
             )
-            updated_summary = self._refresh_session_summary(
+            updated_summary = self._safe_refresh_session_summary(
                 session_id=session_id,
                 state_patch=state_patch,
                 projected_messages=projected_history
@@ -407,7 +426,7 @@ class ApiOnlyExecutionService:
             answer_text = result.answer.strip()
             if not answer_text:
                 answer_text = "Agent completed the turn but did not return a textual answer."
-            updated_summary = self._refresh_session_summary(
+            updated_summary = self._safe_refresh_session_summary(
                 session_id=session_id,
                 state_patch=state_patch,
                 projected_messages=projected_history
@@ -444,7 +463,7 @@ class ApiOnlyExecutionService:
                 session_id=session_id,
                 strategic_context=strategic_context,
             )
-            updated_summary = self._refresh_session_summary(
+            updated_summary = self._safe_refresh_session_summary(
                 session_id=session_id,
                 state_patch=state_patch,
                 projected_messages=projected_history
@@ -469,9 +488,7 @@ class ApiOnlyExecutionService:
             "strategic_context": strategic_context or {},
         }
 
-        strategic_summary = self._summarize_strategic_context(strategic_context)
-        if strategic_summary:
-            sections.append(strategic_summary)
+        normalized = question.lower()
 
         overview, overview_summary = self._execute_action_with_retry(
             "agent.get_overview",
@@ -481,7 +498,6 @@ class ApiOnlyExecutionService:
             strategic_context=strategic_context,
         )
         output["agent_overview"] = overview.get("data")
-        sections.append(self._summarize_agent_overview(overview.get("data") or {}))
         tool_events.append({"action": "agent.get_overview", "ok": True, "result_summary": overview_summary})
 
         runtime, runtime_summary = self._execute_action_with_retry(
@@ -492,7 +508,6 @@ class ApiOnlyExecutionService:
             strategic_context=strategic_context,
         )
         output["runtime_status"] = runtime.get("data")
-        sections.append(self._summarize_runtime_status(runtime.get("data") or {}))
         tool_events.append({"action": "agent.get_runtime_status", "ok": True, "result_summary": runtime_summary})
 
         alerts, alerts_summary = self._execute_action_with_retry(
@@ -503,11 +518,9 @@ class ApiOnlyExecutionService:
             strategic_context=strategic_context,
         )
         output["alerts"] = alerts.get("data")
-        sections.append(self._summarize_alerts((alerts.get("data") or {}).get("alerts") or []))
         tool_events.append({"action": "agent.list_alerts", "ok": True, "result_summary": alerts_summary})
 
-        normalized = question.lower()
-        if any(keyword in normalized for keyword in ("traffic", "stats", "insight", "analysis", "report")):
+        if any(keyword in normalized for keyword in ("traffic", "stats", "insight", "analysis", "report", "分析", "统计", "报告", "研判")):
             try:
                 insight, insight_summary = self._execute_action_with_retry(
                     "insights.ask",
@@ -523,6 +536,22 @@ class ApiOnlyExecutionService:
                 tool_events.append({"action": "insights.ask", "ok": True, "result_summary": insight_summary})
             except Exception:
                 tool_events.append({"action": "insights.ask", "ok": False, "error": "fallback insight request failed"})
+
+        strategic_summary = self._summarize_strategic_context(strategic_context)
+        if strategic_summary and any(keyword in normalized for keyword in ("策略", "长期", "风险", "strategy", "risk")):
+            sections.append(strategic_summary)
+
+        overview_data = overview.get("data") or {}
+        runtime_data = runtime.get("data") or {}
+        alert_list = (alerts.get("data") or {}).get("alerts") or []
+        concise_summary = self._build_chat_fallback_answer(
+            question=question,
+            overview=overview_data,
+            runtime_status=runtime_data,
+            alerts=alert_list,
+        )
+        if concise_summary:
+            sections.insert(0, concise_summary)
 
         plan = self.goal_planner.plan(
             question=question,
@@ -575,6 +604,27 @@ class ApiOnlyExecutionService:
         )
         self._patch_session(session_id, {"state_patch": new_state_patch})
         return new_summary
+
+    def _safe_refresh_session_summary(
+        self,
+        *,
+        session_id: str,
+        state_patch: dict[str, Any] | None,
+        projected_messages: list[dict[str, Any]],
+    ) -> str:
+        try:
+            return self._refresh_session_summary(
+                session_id=session_id,
+                state_patch=state_patch,
+                projected_messages=projected_messages,
+            )
+        except Exception:
+            return self.summary_manager.get_summary_text(state_patch)
+
+    @staticmethod
+    def _should_force_chat_fallback() -> bool:
+        value = str(os.getenv("AGENT_CHAT_FORCE_FALLBACK", "")).strip().lower()
+        return value in {"1", "true", "yes", "on"}
 
     def _get_session(self, session_id: str) -> dict[str, Any]:
         return self._get(f"{self.settings.control_plane_url}/agent/sessions/{session_id}")
@@ -723,13 +773,13 @@ class ApiOnlyExecutionService:
         lines: list[str] = []
         priority_tier = str(strategic_context.get("priority_tier") or "").strip()
         if priority_tier:
-            lines.append(f"Strategic priority: {priority_tier}.")
+            lines.append(f"当前策略优先级：{priority_tier}。")
         strategy_summary = str(strategic_context.get("strategy_summary") or "").strip()
         if strategy_summary:
             lines.append(strategy_summary)
         strategy_feedback_summary = str(strategic_context.get("strategy_feedback_summary") or "").strip()
         if strategy_feedback_summary:
-            lines.append("Recent strategy feedback: " + strategy_feedback_summary)
+            lines.append("最近策略反馈：" + strategy_feedback_summary)
         risk_clusters = strategic_context.get("risk_clusters")
         if isinstance(risk_clusters, list) and risk_clusters:
             cluster = risk_clusters[0] if isinstance(risk_clusters[0], dict) else {}
@@ -737,10 +787,10 @@ class ApiOnlyExecutionService:
             severity = str(cluster.get("severity") or "").strip()
             summary = str(cluster.get("summary") or "").strip()
             if label or summary:
-                lines.append(f"Top risk cluster: [{severity or 'medium'}] {label} {summary}".strip())
+                lines.append(f"当前主要风险簇：[{severity or 'medium'}] {label} {summary}".strip())
         directives = strategic_context.get("strategy_directives")
         if isinstance(directives, list) and directives:
-            lines.append("Active strategy directives:")
+            lines.append("当前策略指令：")
             for item in directives[:3]:
                 text = " ".join(str(item or "").split()).strip()
                 if text:
@@ -748,7 +798,7 @@ class ApiOnlyExecutionService:
         feedback_status_counts = strategic_context.get("feedback_status_counts")
         if isinstance(feedback_status_counts, dict) and feedback_status_counts:
             lines.append(
-                "Strategy feedback counts: "
+                "策略反馈统计："
                 + ", ".join(f"{key}={value}" for key, value in sorted(feedback_status_counts.items()))
             )
         return "\n".join(lines).strip()
@@ -1165,43 +1215,43 @@ class ApiOnlyExecutionService:
         sessions = overview.get("recent_sessions") or []
 
         lines = [
-            "Agent operations overview:",
+            "Agent 运行概览：",
             (
-                f"- Active runs: {counts.get('active_runs', 0)}, queued: {counts.get('queued_runs', 0)}, "
-                f"pending approvals: {counts.get('pending_approvals', 0)}, enabled patrol plans: {counts.get('enabled_scheduled_tasks', 0)}"
+                f"- 活跃运行 {counts.get('active_runs', 0)}，排队 {counts.get('queued_runs', 0)}，"
+                f"待审批 {counts.get('pending_approvals', 0)}，启用巡检计划 {counts.get('enabled_scheduled_tasks', 0)}"
             ),
             (
-                f"- Completed in last 24h: {counts.get('completed_last_24h', 0)}, "
-                f"failed in last 24h: {counts.get('failed_last_24h', 0)}"
+                f"- 近 24 小时完成 {counts.get('completed_last_24h', 0)}，失败 {counts.get('failed_last_24h', 0)}"
             ),
             (
-                f"- Active goals: {counts.get('active_goals', 0)}, blocked goals: {counts.get('blocked_goals', 0)}"
+                f"- 活跃目标 {counts.get('active_goals', 0)}，阻塞目标 {counts.get('blocked_goals', 0)}"
             ),
         ]
 
         if active_runs:
-            lines.append("- Currently processing:")
+            lines.append("- 当前处理：")
             for run in active_runs[:3]:
-                action = ((run.get("input_payload") or {}).get("action") or run.get("schedule_mode") or "run").strip()
+                action = (run.get("input_summary") or {}).get("action") or run.get("schedule_mode") or "run"
+                action = str(action).strip()
                 detail = str(run.get("trigger_text") or run.get("result_summary") or run.get("session_title") or "").strip()
                 lines.append(
-                    f"  - {run.get('status')} {action}, progress {run.get('progress', 0)}%, detail: {detail or 'No summary'}"
+                    f"  - {run.get('status')} {action}，进度 {run.get('progress', 0)}%，内容：{detail or '无摘要'}"
                 )
 
         if approvals:
-            lines.append("- Pending approvals:")
+            lines.append("- 待审批：")
             for approval in approvals[:3]:
                 lines.append(
-                    f"  - {approval.get('tool_name')}, risk {approval.get('risk_level')}, "
-                    f"session {approval.get('session_title') or approval.get('session_id')}"
+                    f"  - {approval.get('tool_name')}，风险 {approval.get('risk_level')}，"
+                    f"会话 {approval.get('session_title') or approval.get('session_id')}"
                 )
 
         if sessions:
-            lines.append("- Recent sessions:")
+            lines.append("- 最近会话：")
             for session in sessions[:3]:
                 lines.append(
-                    f"  - {session.get('title') or session.get('id')}, source {session.get('source')}, "
-                    f"last updated {session.get('updated_at') or '--'}"
+                    f"  - {session.get('title') or session.get('id')}，来源 {session.get('source')}，"
+                    f"最近更新 {session.get('updated_at') or '--'}"
                 )
 
         return "\n".join(lines)
@@ -1209,25 +1259,67 @@ class ApiOnlyExecutionService:
     @staticmethod
     def _summarize_runtime_status(runtime_status: dict[str, Any]) -> str:
         loops = runtime_status.get("loops") or {}
-        lines = ["Runtime status:"]
+        lines = ["运行时状态："]
         for key in ("runtime", "scheduler", "email"):
             item = loops.get(key) or {}
+            label = {"runtime": "执行循环", "scheduler": "调度循环", "email": "邮件循环"}.get(key, key)
             lines.append(
-                f"- {key}: {item.get('health') or 'unknown'}, "
-                f"last_seen={item.get('last_seen_at') or '--'}, restarts={item.get('restart_count', 0)}"
+                f"- {label}：{item.get('health') or 'unknown'}，"
+                f"最近心跳 {item.get('last_seen_at') or '--'}，重启 {item.get('restart_count', 0)} 次"
             )
         return "\n".join(lines)
 
     @staticmethod
     def _summarize_alerts(alerts: list[dict[str, Any]]) -> str:
         if not alerts:
-            return "Active alerts: none."
-        lines = [f"Active alerts: {len(alerts)}"]
+            return "当前没有活动告警。"
+        lines = [f"当前活动告警 {len(alerts)} 条："]
         for alert in alerts[:5]:
             lines.append(
-                f"- [{alert.get('severity')}] {alert.get('summary')} ({alert.get('scope_id') or alert.get('scope_type') or 'global'})"
+                f"- [{alert.get('severity')}] {alert.get('summary')}（{alert.get('scope_id') or alert.get('scope_type') or 'global'}）"
             )
         return "\n".join(lines)
+
+    def _build_chat_fallback_answer(
+        self,
+        *,
+        question: str,
+        overview: dict[str, Any],
+        runtime_status: dict[str, Any],
+        alerts: list[dict[str, Any]],
+    ) -> str:
+        normalized = (question or "").lower()
+        counts = overview.get("counts") or {}
+        loops = runtime_status.get("loops") or {}
+        runtime_health = (loops.get("runtime") or {}).get("health") or "unknown"
+        scheduler_health = (loops.get("scheduler") or {}).get("health") or "unknown"
+        email_health = (loops.get("email") or {}).get("health") or "unknown"
+        active_runs = counts.get("active_runs", 0)
+        queued_runs = counts.get("queued_runs", 0)
+        open_alerts = len(alerts or [])
+
+        if any(keyword in normalized for keyword in ("正常", "状态", "工作", "运行", "在吗", "chat", "聊天")):
+            return (
+                f"我现在可以正常工作。当前执行循环状态为 {runtime_health}，"
+                f"活跃任务 {active_runs} 个，排队任务 {queued_runs} 个，活动告警 {open_alerts} 条。"
+            )
+
+        if any(keyword in normalized for keyword in ("能做什么", "可以做什么", "功能", "capability")):
+            return (
+                "我目前可以进行网页对话、查看系统运行状态、读取告警与会话、"
+                "配合分析结果做检索与简要研判。"
+            )
+
+        if any(keyword in normalized for keyword in ("上传", "分析", "检索", "搜索", "文件", "任务")):
+            return (
+                f"当前上传、分析和检索主链可用。系统当前排队任务 {queued_runs} 个，"
+                f"执行循环 {runtime_health}，调度循环 {scheduler_health}，邮件循环 {email_health}。"
+            )
+
+        return (
+            f"我已收到你的问题。当前执行循环 {runtime_health}，"
+            f"活跃任务 {active_runs} 个，活动告警 {open_alerts} 条。"
+        )
 
     @staticmethod
     def _messages_end_with_prompt(messages: list[dict[str, Any]], prompt: str) -> bool:
