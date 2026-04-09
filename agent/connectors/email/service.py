@@ -120,8 +120,34 @@ def _extract_text_body(message) -> str:
     except Exception:
         return ""
     if (message.get_content_type() or "").lower() == "text/html":
-        return re.sub(r"<[^>]+>", " ", payload or "").strip()
-    return str(payload or "").strip()
+        return _normalize_email_body(re.sub(r"<[^>]+>", " ", payload or ""))
+    return _normalize_email_body(str(payload or ""))
+
+
+def _normalize_email_body(value: str) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\u00a0", " ")
+    lines: list[str] = []
+    signature_patterns = [
+        re.compile(r"^\s*sent from my iphone\s*$", re.IGNORECASE),
+        re.compile(r"^\s*sent from my ipad\s*$", re.IGNORECASE),
+        re.compile(r"^\s*发自我的iPhone\s*$", re.IGNORECASE),
+        re.compile(r"^\s*发自我的iPad\s*$", re.IGNORECASE),
+        re.compile(r"^\s*从我的华为手机发送\s*$", re.IGNORECASE),
+    ]
+    for raw_line in text.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            if lines and lines[-1] != "":
+                lines.append("")
+            continue
+        if any(pattern.match(line) for pattern in signature_patterns):
+            continue
+        lines.append(line)
+
+    normalized = "\n".join(lines).strip()
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized
 
 
 def _normalize_email_address(value: str | None) -> str:

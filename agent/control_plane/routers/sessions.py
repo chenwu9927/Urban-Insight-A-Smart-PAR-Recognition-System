@@ -28,7 +28,7 @@ def _normalize_title(value: str | None) -> str | None:
     return text
 
 
-def _serialize_session_summary(session: AgentSession) -> AgentSessionResponse:
+def _serialize_session_summary(session: AgentSession, *, include_details: bool = False) -> AgentSessionResponse:
     return AgentSessionResponse(
         id=session.id,
         kind=session.kind,
@@ -38,8 +38,8 @@ def _serialize_session_summary(session: AgentSession) -> AgentSessionResponse:
         site_id=session.site_id,
         camera_id=session.camera_id,
         source=session.source,
-        config_snapshot=None,
-        state_patch=None,
+        config_snapshot=session.config_snapshot if include_details else None,
+        state_patch=session.state_patch if include_details else None,
         last_run_at=session.last_run_at,
         created_at=session.created_at,
         updated_at=session.updated_at,
@@ -123,7 +123,7 @@ def create_session(payload: AgentSessionCreate, db: Session = Depends(get_db)):
     db.add(session)
     db.commit()
     db.refresh(session)
-    return session
+    return _serialize_session_summary(session, include_details=True)
 
 
 @router.get("/agent/sessions/{session_id}", response_model=AgentSessionResponse)
@@ -135,7 +135,7 @@ def get_session(session_id: str, db: Session = Depends(get_db)):
     )
     if not session:
         raise HTTPException(status_code=404, detail="Agent session not found")
-    return _serialize_session_summary(session)
+    return _serialize_session_summary(session, include_details=True)
 
 
 @router.get("/agent/sessions/{session_id}/messages", response_model=list[AgentMessageResponse])
@@ -209,4 +209,4 @@ def update_session(
 
     db.commit()
     db.refresh(session)
-    return session
+    return _serialize_session_summary(session, include_details=True)
