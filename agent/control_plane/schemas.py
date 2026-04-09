@@ -78,6 +78,23 @@ class AgentMessageResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AgentUnifiedMessageResponse(BaseModel):
+    id: str
+    session_id: str
+    session_title: Optional[str] = None
+    session_source: str
+    session_kind: str
+    run_id: Optional[str] = None
+    role: str
+    content: dict[str, Any]
+    text_preview: Optional[str] = None
+    connector: Optional[str] = None
+    connector_message_id: Optional[str] = None
+    thread_key: Optional[str] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
 class AgentRunCreate(BaseModel):
     session_id: str
     action: Optional[str] = None

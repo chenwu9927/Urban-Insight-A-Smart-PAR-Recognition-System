@@ -9,6 +9,7 @@ from agent.control_plane.schemas import (
     AgentSessionCreate,
     AgentSessionResponse,
     AgentSessionUpdate,
+    AgentUnifiedMessageResponse,
 )
 from agent.control_plane.services import create_message
 from agent.models import AgentMessage, AgentSession
@@ -45,6 +46,25 @@ def _serialize_session_summary(session: AgentSession) -> AgentSessionResponse:
     )
 
 
+def _serialize_unified_message(message: AgentMessage, session: AgentSession) -> AgentUnifiedMessageResponse:
+    return AgentUnifiedMessageResponse(
+        id=message.id,
+        session_id=message.session_id,
+        session_title=_normalize_title(session.title),
+        session_source=session.source,
+        session_kind=session.kind,
+        run_id=message.run_id,
+        role=message.role,
+        content=message.content,
+        text_preview=message.text_preview,
+        connector=message.connector,
+        connector_message_id=message.connector_message_id,
+        thread_key=message.thread_key,
+        created_at=message.created_at,
+        updated_at=message.updated_at,
+    )
+
+
 @router.get("/agent/sessions", response_model=list[AgentSessionResponse])
 def list_sessions(
     kind: str | None = None,
@@ -71,6 +91,28 @@ def list_sessions(
         query = query.filter(AgentSession.camera_id == camera_id)
     sessions = query.order_by(AgentSession.created_at.desc()).limit(limit).all()
     return [_serialize_session_summary(session) for session in sessions]
+
+
+@router.get("/agent/messages/unified", response_model=list[AgentUnifiedMessageResponse])
+def list_unified_messages(
+    limit: int = Query(default=120, ge=1, le=500),
+    operator_only: bool = Query(default=True),
+    db: Session = Depends(get_db),
+):
+    query = (
+        db.query(AgentMessage, AgentSession)
+        .join(AgentSession, AgentSession.id == AgentMessage.session_id)
+        .filter(AgentSession.is_deleted == False)  # noqa: E712
+    )
+    if operator_only:
+        query = query.filter(AgentSession.source.in_(OPERATOR_SESSION_SOURCES))
+    rows = (
+        query.order_by(AgentMessage.created_at.desc(), AgentMessage.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    serialized = [_serialize_unified_message(message, session) for message, session in reversed(rows)]
+    return serialized
 
 
 @router.post("/agent/sessions", response_model=AgentSessionResponse)

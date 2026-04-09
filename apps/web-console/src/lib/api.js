@@ -28,6 +28,8 @@ export const agentApi = {
         (await api.put(`/agent/subscriptions/${subscriptionId}`, payload)).data,
     deleteSubscription: async (subscriptionId) => (await api.delete(`/agent/subscriptions/${subscriptionId}`)).data,
     listSessions: async (params = {}) => (await api.get('/agent/sessions', { params: compactParams(params) })).data,
+    listUnifiedMessages: async (params = {}) =>
+        (await api.get('/agent/messages/unified', { params: compactParams(params) })).data,
     createSession: async (payload) => (await api.post('/agent/sessions', payload)).data,
     getSession: async (sessionId) => (await api.get(`/agent/sessions/${sessionId}`)).data,
     listSessionMessages: async (sessionId, params = {}) =>

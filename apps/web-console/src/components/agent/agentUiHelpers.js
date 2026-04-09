@@ -30,8 +30,10 @@ export function getSessionTitle(session) {
     if (!isPlaceholderTitle(title)) {
         return title;
     }
+    if (session?.source === 'email') return '邮件对话';
+    if (session?.source === 'web') return '网页对话';
     const suffix = session?.id?.slice(0, 8) || '';
-    return `未命名会话 ${suffix}`.trim();
+    return suffix ? `未命名会话 ${suffix}` : '未命名会话';
 }
 
 export function getSummaryText(summary) {
@@ -136,6 +138,19 @@ export function translateSeverity(value) {
         critical: '严重',
     };
     return mapping[value] || value || '--';
+}
+
+export function translateRole(value) {
+    if (value === 'user') return '你';
+    if (value === 'assistant') return '智能体';
+    if (value === 'system') return '系统';
+    return value || '--';
+}
+
+export function sourceToneClass(value) {
+    if (value === 'email') return 'is-email';
+    if (value === 'web') return 'is-web';
+    return 'is-neutral';
 }
 
 export function isRunActive(run) {

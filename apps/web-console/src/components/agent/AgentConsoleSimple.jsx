@@ -1,48 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { agentApi } from '../../lib/api';
-import { toTimestamp } from '../../lib/time';
 import {
     ACTIVE_POLL_INTERVAL_MS,
     POLL_INTERVAL_MS,
     formatDateTime,
     getMessageText,
     getSessionTitle,
-    getSummaryText,
-    isPlaceholderTitle,
-    isRunActive,
-    sortSessions,
+    sourceToneClass,
     translateAlertStatus,
     translateApprovalStatus,
     translateLoopHealth,
     translateLoopName,
+    translateRole,
     translateRunStatus,
-    translateScheduleMode,
     translateSeverity,
     translateSource,
 } from './agentUiHelpers';
 
 const STREAM_STEP_MS = 18;
 const STREAM_CHARS_PER_TICK = 2;
-const PLACEHOLDER_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-
-function shouldHideSession(item, selectedSessionId) {
-    if (!item) return true;
-    if (item.id === selectedSessionId) return false;
-    if (item.source !== 'web' || item.kind !== 'command') return true;
-    if (!isPlaceholderTitle(item.title)) return false;
-    const ageMs = Date.now() - toTimestamp(item.last_run_at || item.updated_at || 0);
-    return ageMs > PLACEHOLDER_SESSION_MAX_AGE_MS;
-}
 
 function AgentConsoleSimple({ user }) {
     const [overview, setOverview] = useState(null);
     const [runtimeStatus, setRuntimeStatus] = useState(null);
+    const [unifiedMessages, setUnifiedMessages] = useState([]);
     const [sessions, setSessions] = useState([]);
     const [approvals, setApprovals] = useState([]);
     const [scheduledTasks, setScheduledTasks] = useState([]);
     const [runtimeAlerts, setRuntimeAlerts] = useState([]);
-    const [selectedSessionId, setSelectedSessionId] = useState('');
-    const [messages, setMessages] = useState([]);
+    const [primarySessionId, setPrimarySessionId] = useState('');
     const [sessionRuns, setSessionRuns] = useState([]);
     const [loading, setLoading] = useState(true);
     const [conversationLoading, setConversationLoading] = useState(false);
@@ -57,26 +43,6 @@ function AgentConsoleSimple({ user }) {
     const messageListRef = useRef(null);
     const streamTimerRef = useRef(null);
     const animatedMessageIdsRef = useRef(new Set());
-
-    const selectedSession = useMemo(
-        () => sessions.find((item) => item.id === selectedSessionId) || null,
-        [sessions, selectedSessionId],
-    );
-
-    const visibleSessions = useMemo(
-        () => sessions.filter((item) => !shouldHideSession(item, selectedSessionId)),
-        [selectedSessionId, sessions],
-    );
-
-    const activeSessionRun = useMemo(
-        () => sessionRuns.find((item) => isRunActive(item)) || null,
-        [sessionRuns],
-    );
-
-    const selectedSummary = useMemo(
-        () => getSummaryText(selectedSession?.state_patch?.context_summary),
-        [selectedSession],
-    );
 
     const clearStreamTimer = useCallback(() => {
         if (streamTimerRef.current) {
@@ -105,75 +71,87 @@ function AgentConsoleSimple({ user }) {
         [clearStreamTimer],
     );
 
-    const loadOverview = useCallback(async () => {
-        const [nextOverview, nextRuntime, nextSessions, nextApprovals, nextTasks, nextAlerts] = await Promise.all([
-            agentApi.overview(),
-            agentApi.runtimeStatus(),
-            agentApi.listSessions({ limit: 40, kind: 'command', source: 'web' }),
-            agentApi.listApprovals({ limit: 20 }),
-            agentApi.listScheduledTasks({ limit: 20 }),
-            agentApi.listAlerts({ status: 'open', limit: 20 }),
-        ]);
+    const primarySession = useMemo(
+        () =>
+            sessions.find((item) => item.id === primarySessionId) ||
+            sessions.find((item) => item.source === 'web' && item.kind === 'command') ||
+            null,
+        [primarySessionId, sessions],
+    );
 
-        const orderedSessions = sortSessions(nextSessions || []);
-        const filteredSessions = orderedSessions.filter((item) => !shouldHideSession(item, ''));
-        setOverview(nextOverview || null);
-        setRuntimeStatus(nextRuntime || null);
-        setSessions(orderedSessions);
-        setApprovals(nextApprovals || []);
-        setScheduledTasks(nextTasks || []);
-        setRuntimeAlerts(nextAlerts || []);
-        setSelectedSessionId((current) => {
-            if (current && orderedSessions.some((item) => item.id === current)) {
-                return current;
-            }
-            return filteredSessions[0]?.id || '';
-        });
-    }, []);
+    const activeSessionRun = useMemo(
+        () =>
+            sessionRuns.find((item) =>
+                ['queued', 'claimed', 'running', 'waiting_approval', 'waiting_input'].includes(item?.status),
+            ) || null,
+        [sessionRuns],
+    );
+
+    const summaryItems = useMemo(
+        () => [
+            { label: '活跃任务', value: overview?.counts?.active_runs ?? 0 },
+            { label: '待审批', value: overview?.counts?.pending_approvals ?? 0 },
+            { label: '开放告警', value: runtimeAlerts.filter((item) => item.status === 'open').length },
+        ],
+        [overview, runtimeAlerts],
+    );
+
+    const loopEntries = Object.entries(runtimeStatus?.loops || {});
+    const activeRuns = (overview?.active_runs || []).slice(0, 4);
+    const recentApprovals = approvals.slice(0, 3);
+    const recentTasks = scheduledTasks.slice(0, 3);
+    const openAlerts = runtimeAlerts.filter((item) => item.status === 'open').slice(0, 3);
 
     const loadConversation = useCallback(async (sessionId, { background = false } = {}) => {
-        if (!sessionId) {
-            setMessages([]);
-            setSessionRuns([]);
-            setPendingRunId('');
-            return;
-        }
         if (!background) setConversationLoading(true);
         try {
-            const [nextMessages, nextRuns] = await Promise.all([
-                agentApi.listSessionMessages(sessionId, { limit: 80 }),
-                agentApi.listRuns({ session_id: sessionId, limit: 20 }),
+            const [nextMessages, nextSessions, nextRuns] = await Promise.all([
+                agentApi.listUnifiedMessages({ limit: 160 }),
+                agentApi.listSessions({ limit: 24, kind: 'command' }),
+                sessionId ? agentApi.listRuns({ session_id: sessionId, limit: 20 }) : Promise.resolve([]),
             ]);
-            setMessages(nextMessages || []);
+            setUnifiedMessages(nextMessages || []);
+            setSessions(nextSessions || []);
             setSessionRuns(nextRuns || []);
-            const nextPendingRun = (nextRuns || []).find((item) => isRunActive(item));
+            const nextPendingRun = (nextRuns || []).find((item) =>
+                ['queued', 'claimed', 'running', 'waiting_approval', 'waiting_input'].includes(item?.status),
+            );
             setPendingRunId(nextPendingRun?.id || '');
         } catch (loadError) {
-            console.error('Failed to load conversation', loadError);
-            if (loadError?.response?.status === 404) {
-                setSelectedSessionId('');
-                setMessages([]);
-                setSessionRuns([]);
-                setPendingRunId('');
-                return;
-            }
-            setError('会话内容加载失败。');
+            console.error('Failed to load agent conversation', loadError);
+            setError('对话内容加载失败。');
         } finally {
             if (!background) setConversationLoading(false);
         }
     }, []);
 
+    const loadOverview = useCallback(async () => {
+        const [nextOverview, nextRuntime, nextApprovals, nextTasks, nextAlerts] = await Promise.all([
+            agentApi.overview(),
+            agentApi.runtimeStatus(),
+            agentApi.listApprovals({ limit: 20 }),
+            agentApi.listScheduledTasks({ limit: 20 }),
+            agentApi.listAlerts({ status: 'open', limit: 20 }),
+        ]);
+
+        setOverview(nextOverview || null);
+        setRuntimeStatus(nextRuntime || null);
+        setApprovals(nextApprovals || []);
+        setScheduledTasks(nextTasks || []);
+        setRuntimeAlerts(nextAlerts || []);
+    }, []);
+
     const refreshAll = useCallback(async () => {
         try {
-            await loadOverview();
+            await Promise.all([loadOverview(), loadConversation(primarySessionId, { background: true })]);
             setError('');
         } catch (loadError) {
-            console.error('Failed to load agent console', loadError);
+            console.error('Failed to refresh agent console', loadError);
             setError('智能体工作台刷新失败。');
         } finally {
             setLoading(false);
         }
-    }, [loadOverview]);
+    }, [loadConversation, loadOverview, primarySessionId]);
 
     useEffect(() => {
         void refreshAll();
@@ -184,19 +162,25 @@ function AgentConsoleSimple({ user }) {
     }, [refreshAll]);
 
     useEffect(() => {
-        void loadConversation(selectedSessionId);
-    }, [loadConversation, selectedSessionId]);
+        if (!primarySessionId && sessions.length) {
+            const nextPrimary = sessions.find((item) => item.source === 'web' && item.kind === 'command')?.id || sessions[0].id;
+            setPrimarySessionId(nextPrimary);
+        }
+    }, [primarySessionId, sessions]);
 
     useEffect(() => {
-        if (!selectedSessionId) return undefined;
+        void loadConversation(primarySessionId);
+    }, [loadConversation, primarySessionId]);
+
+    useEffect(() => {
         const timer = window.setInterval(() => {
-            void loadConversation(selectedSessionId, { background: true });
+            void loadConversation(primarySessionId, { background: true });
         }, activeSessionRun || pendingRunId ? ACTIVE_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
         return () => window.clearInterval(timer);
-    }, [activeSessionRun, loadConversation, pendingRunId, selectedSessionId]);
+    }, [activeSessionRun, loadConversation, pendingRunId, primarySessionId]);
 
     useEffect(() => {
-        const latestAssistant = [...messages].reverse().find((item) => item.role === 'assistant');
+        const latestAssistant = [...unifiedMessages].reverse().find((item) => item.role === 'assistant');
         if (!latestAssistant) return;
         const fullText = getMessageText(latestAssistant);
         if (!fullText) return;
@@ -207,14 +191,14 @@ function AgentConsoleSimple({ user }) {
             return;
         }
         startStreamingText(latestAssistant.id, fullText);
-    }, [messages, startStreamingText, streamState.done, streamState.messageId]);
+    }, [unifiedMessages, startStreamingText, streamState.done, streamState.messageId]);
 
     useEffect(() => {
         messageListRef.current?.scrollTo({
             top: messageListRef.current.scrollHeight,
             behavior: 'smooth',
         });
-    }, [messages, pendingRunId, streamState.text]);
+    }, [pendingRunId, streamState.text, unifiedMessages]);
 
     useEffect(
         () => () => {
@@ -229,17 +213,17 @@ function AgentConsoleSimple({ user }) {
         setSending(true);
         setError('');
         try {
-            let sessionId = selectedSessionId;
+            let sessionId = primarySessionId;
             if (!sessionId) {
                 const newSession = await agentApi.createSession({
                     kind: 'command',
-                    title: prompt.slice(0, 48),
+                    title: '运营对话',
                     status: 'active',
                     source: 'web',
                     owner_user_id: user?.id || null,
                 });
                 sessionId = newSession.id;
-                setSelectedSessionId(sessionId);
+                setPrimarySessionId(sessionId);
             }
 
             const run = await agentApi.createRun({
@@ -252,7 +236,7 @@ function AgentConsoleSimple({ user }) {
 
             setPendingRunId(run?.id || '');
             setDraft('');
-            await Promise.all([refreshAll(), loadConversation(sessionId, { background: true })]);
+            await Promise.all([loadOverview(), loadConversation(sessionId, { background: true })]);
         } catch (sendError) {
             console.error('Failed to send agent request', sendError);
             setError(sendError?.response?.data?.detail || '发送失败。');
@@ -283,7 +267,7 @@ function AgentConsoleSimple({ user }) {
         try {
             const dispatch = await agentApi.triggerScheduledTask(taskId);
             if (dispatch?.session_id) {
-                setSelectedSessionId(dispatch.session_id);
+                setPrimarySessionId(dispatch.session_id);
                 await loadConversation(dispatch.session_id, { background: true });
             }
             await refreshAll();
@@ -321,18 +305,8 @@ function AgentConsoleSimple({ user }) {
         }
     };
 
-    const summaryItems = [
-        { label: '活跃任务', value: overview?.counts?.active_runs ?? 0 },
-        { label: '待审批', value: overview?.counts?.pending_approvals ?? 0 },
-        { label: '启用巡检', value: overview?.counts?.enabled_scheduled_tasks ?? 0 },
-    ];
-
-    const activeRuns = (overview?.active_runs || []).slice(0, 4);
-    const loopEntries = Object.entries(runtimeStatus?.loops || {});
-    const recentAlerts = runtimeAlerts.slice(0, 4);
-
     return (
-        <div className="page-shell">
+        <div className="page-shell agent-console-shell">
             {error ? <div className="notice error">{error}</div> : null}
             {loading ? <div className="empty-state">正在加载…</div> : null}
 
@@ -345,63 +319,113 @@ function AgentConsoleSimple({ user }) {
                         </div>
                     ))}
                     <div className="compact-metric is-muted">
-                        <span>开放告警</span>
-                        <strong>{runtimeAlerts.filter((item) => item.status === 'open').length}</strong>
+                        <span>当前会话</span>
+                        <strong>{primarySession ? getSessionTitle(primarySession) : '未开始'}</strong>
                     </div>
                 </div>
             </section>
 
-            <div className="page-grid-2">
-                <section className="card">
-                    <div className="list-row-title">会话</div>
-                    <div className="list compact-list" style={{ marginTop: 10 }}>
-                        {visibleSessions.slice(0, 8).map((session) => (
-                            <button
-                                key={session.id}
-                                type="button"
-                                className={`list-row as-button ${selectedSessionId === session.id ? 'selected' : ''}`}
-                                onClick={() => setSelectedSessionId(session.id)}
-                            >
-                                <div className="list-row-main">
-                                    <div className="list-row-title">{getSessionTitle(session)}</div>
-                                    <div className="list-row-subtitle">
-                                        {translateSource(session.source)} · {formatDateTime(session.updated_at)}
-                                    </div>
-                                </div>
-                            </button>
-                        ))}
-                        {!visibleSessions.length ? <div className="empty-state">暂无会话。</div> : null}
-                    </div>
-                    {selectedSession ? (
-                        <div className="subsection compact-subsection">
-                            <h3>当前摘要</h3>
-                            <pre className="summary-box">{selectedSummary}</pre>
+            <div className="agent-console-grid">
+                <section className="card agent-chat-card">
+                    <div className="agent-chat-header">
+                        <div>
+                            <div className="list-row-title">对话</div>
+                            <div className="list-row-subtitle">
+                                邮件与网页消息会统一显示在这里，时间统一按东八区展示。
+                            </div>
                         </div>
-                    ) : null}
+                    </div>
+
+                    <div className="message-list agent-message-list" ref={messageListRef}>
+                        {conversationLoading ? <div className="empty-state">正在加载…</div> : null}
+                        {!conversationLoading &&
+                            unifiedMessages.map((message) => {
+                                const fallbackText = getMessageText(message) || '暂无内容';
+                                const isStreamingMessage = streamState.messageId === message.id;
+                                const text = isStreamingMessage ? streamState.text || fallbackText : fallbackText;
+                                return (
+                                    <article
+                                        key={message.id}
+                                        className={`message-bubble ${message.role} ${sourceToneClass(message.session_source)}`}
+                                    >
+                                        <div className="message-meta-row">
+                                            <span className="message-role">{translateRole(message.role)}</span>
+                                            <span className="message-source-tag">
+                                                {translateSource(message.session_source)}
+                                            </span>
+                                            <span className="message-session-title">
+                                                {getSessionTitle({
+                                                    title: message.session_title,
+                                                    source: message.session_source,
+                                                    id: message.session_id,
+                                                })}
+                                            </span>
+                                        </div>
+                                        <div className="message-text">{text}</div>
+                                        <div className="message-time">{formatDateTime(message.created_at)}</div>
+                                    </article>
+                                );
+                            })}
+                        {!conversationLoading && pendingRunId ? (
+                            <article className="message-bubble assistant is-web">
+                                <div className="message-meta-row">
+                                    <span className="message-role">智能体</span>
+                                    <span className="message-source-tag">网页</span>
+                                </div>
+                                <div className="message-text">正在思考…</div>
+                                <div className="message-time">{translateRunStatus(activeSessionRun?.status || 'running')}</div>
+                            </article>
+                        ) : null}
+                        {!conversationLoading && !unifiedMessages.length && !pendingRunId ? (
+                            <div className="empty-state">还没有对话。你可以直接开始提问，也可以先给智能体发邮件。</div>
+                        ) : null}
+                    </div>
+
+                    <div className="composer agent-composer">
+                        <textarea
+                            value={draft}
+                            onChange={(event) => setDraft(event.target.value)}
+                            placeholder="例如：总结当前异常、检查系统状态、解释一段视频。"
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                                    event.preventDefault();
+                                    void handleSend();
+                                }
+                            }}
+                        />
+                        <div className="action-row">
+                            <span className="composer-tip">Ctrl / Cmd + Enter 发送</span>
+                            <button type="button" className="btn-primary" onClick={handleSend} disabled={sending || !draft.trim()}>
+                                {sending ? '发送中…' : '发送'}
+                            </button>
+                        </div>
+                    </div>
                 </section>
 
-                <section className="card">
-                    <div className="list-row-title">系统状态</div>
-                    <div className="list compact-list" style={{ marginTop: 10 }}>
-                        {loopEntries.map(([name, loop]) => (
-                            <div key={name} className="list-row">
-                                <div className="list-row-main">
-                                    <div className="list-row-title">{translateLoopName(name)}</div>
-                                    <div className="list-row-subtitle">最近心跳 {formatDateTime(loop.last_seen_at)}</div>
+                <aside className="agent-side-rail">
+                    <section className="card compact-card">
+                        <div className="list-row-title">系统状态</div>
+                        <div className="list compact-list" style={{ marginTop: 10 }}>
+                            {loopEntries.map(([name, loop]) => (
+                                <div key={name} className="list-row">
+                                    <div className="list-row-main">
+                                        <div className="list-row-title">{translateLoopName(name)}</div>
+                                        <div className="list-row-subtitle">最近心跳 {formatDateTime(loop.last_seen_at)}</div>
+                                    </div>
+                                    <div className="list-row-meta">
+                                        <span className={`status-tag ${loop.health === 'healthy' ? 'is-success' : 'is-warning'}`}>
+                                            {translateLoopHealth(loop.health)}
+                                        </span>
+                                    </div>
                                 </div>
-                                <div className="list-row-meta">
-                                    <span className={`status-tag ${loop.health === 'healthy' ? 'is-success' : 'is-warning'}`}>
-                                        {translateLoopHealth(loop.health)}
-                                    </span>
-                                </div>
-                            </div>
-                        ))}
-                        {!loopEntries.length ? <div className="empty-state">暂无状态。</div> : null}
-                    </div>
+                            ))}
+                            {!loopEntries.length ? <div className="empty-state">暂无状态。</div> : null}
+                        </div>
+                    </section>
 
-                    <div className="subsection compact-subsection">
-                        <h3>当前任务</h3>
-                        <div className="list compact-list">
+                    <section className="card compact-card">
+                        <div className="list-row-title">当前任务</div>
+                        <div className="list compact-list" style={{ marginTop: 10 }}>
                             {activeRuns.map((run) => (
                                 <div key={run.id} className="list-row">
                                     <div className="list-row-main">
@@ -415,13 +439,93 @@ function AgentConsoleSimple({ user }) {
                             ))}
                             {!activeRuns.length ? <div className="empty-state">暂无活跃任务。</div> : null}
                         </div>
-                    </div>
+                    </section>
 
-                    {recentAlerts.length ? (
-                        <div className="subsection compact-subsection">
-                            <h3>最近告警</h3>
-                            <div className="list compact-list">
-                                {recentAlerts.map((alert) => (
+                    <section className="card compact-card">
+                        <div className="list-row-title">待审批</div>
+                        <div className="list compact-list" style={{ marginTop: 10 }}>
+                            {recentApprovals.map((approval) => (
+                                <div key={approval.id} className="list-row">
+                                    <div className="list-row-main">
+                                        <div className="list-row-title">{approval.summary || approval.reason || '审批请求'}</div>
+                                        <div className="list-row-subtitle">
+                                            风险 {approval.risk_level || '--'} · 截止 {formatDateTime(approval.expires_at)}
+                                        </div>
+                                    </div>
+                                    <div className="list-row-meta">
+                                        <span>{translateApprovalStatus(approval.status)}</span>
+                                        {approval.status === 'pending' ? (
+                                            <div className="table-actions">
+                                                <button
+                                                    type="button"
+                                                    className="btn-ghost"
+                                                    onClick={() => handleApproval(approval.id, 'approved')}
+                                                    disabled={approvalSubmittingId === approval.id}
+                                                >
+                                                    批准
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="btn-ghost danger"
+                                                    onClick={() => handleApproval(approval.id, 'rejected')}
+                                                    disabled={approvalSubmittingId === approval.id}
+                                                >
+                                                    拒绝
+                                                </button>
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                </div>
+                            ))}
+                            {!recentApprovals.length ? <div className="empty-state">暂无待审批。</div> : null}
+                        </div>
+                    </section>
+
+                    <section className="card compact-card">
+                        <div className="list-row-title">巡检计划</div>
+                        {!scheduledTasks.length ? (
+                            <div className="action-row" style={{ marginTop: 10 }}>
+                                <button type="button" className="btn-primary" onClick={handleBootstrapDefaults} disabled={bootstrapping}>
+                                    {bootstrapping ? '初始化中…' : '初始化默认巡检'}
+                                </button>
+                            </div>
+                        ) : null}
+                        <div className="list compact-list" style={{ marginTop: 10 }}>
+                            {recentTasks.map((task) => (
+                                <div key={task.id} className="list-row">
+                                    <div className="list-row-main">
+                                        <div className="list-row-title">{task.name}</div>
+                                        <div className="list-row-subtitle">下次运行 {formatDateTime(task.next_run_at)}</div>
+                                    </div>
+                                    <div className="list-row-meta">
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            onClick={() => handleTaskTrigger(task.id)}
+                                            disabled={taskSubmittingId === `trigger:${task.id}`}
+                                        >
+                                            运行
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            onClick={() => handleTaskToggle(task)}
+                                            disabled={taskSubmittingId === `toggle:${task.id}`}
+                                        >
+                                            {task.enabled ? '暂停' : '启用'}
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                            {!recentTasks.length ? <div className="empty-state">暂无巡检计划。</div> : null}
+                        </div>
+                    </section>
+
+                    {openAlerts.length ? (
+                        <section className="card compact-card">
+                            <div className="list-row-title">开放告警</div>
+                            <div className="list compact-list" style={{ marginTop: 10 }}>
+                                {openAlerts.map((alert) => (
                                     <div key={alert.id} className="list-row">
                                         <div className="list-row-main">
                                             <div className="list-row-title">{alert.summary || '运行告警'}</div>
@@ -434,161 +538,9 @@ function AgentConsoleSimple({ user }) {
                                     </div>
                                 ))}
                             </div>
-                        </div>
+                        </section>
                     ) : null}
-                </section>
-            </div>
-
-            <section className="card">
-                <div className="list-row-title">对话</div>
-
-                <div className="message-list" ref={messageListRef} style={{ marginTop: 10 }}>
-                    {conversationLoading ? <div className="empty-state">正在加载…</div> : null}
-                    {!conversationLoading &&
-                        messages.map((message) => {
-                            const fallbackText = getMessageText(message) || '暂无内容';
-                            const isStreamingMessage = streamState.messageId === message.id;
-                            const text = isStreamingMessage ? streamState.text || fallbackText : fallbackText;
-                            return (
-                                <article key={message.id} className={`message-bubble ${message.role}`}>
-                                    <div className="message-role">{message.role === 'user' ? '你' : '智能体'}</div>
-                                    <div className="message-text">{text}</div>
-                                    <div className="message-time">{formatDateTime(message.created_at)}</div>
-                                </article>
-                            );
-                        })}
-                    {!conversationLoading && pendingRunId ? (
-                        <article className="message-bubble assistant">
-                            <div className="message-role">智能体</div>
-                            <div className="message-text">正在思考…</div>
-                            <div className="message-time">{translateRunStatus(activeSessionRun?.status || 'running')}</div>
-                        </article>
-                    ) : null}
-                    {!conversationLoading && !messages.length && !pendingRunId ? <div className="empty-state">暂无消息。</div> : null}
-                </div>
-
-                <div className="composer">
-                    <textarea
-                        value={draft}
-                        onChange={(event) => setDraft(event.target.value)}
-                        placeholder="例如：总结当前异常、解释某段视频、检查系统状态。"
-                        onKeyDown={(event) => {
-                            if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-                                event.preventDefault();
-                                void handleSend();
-                            }
-                        }}
-                    />
-                    <div className="action-row">
-                        <span className="composer-tip">Ctrl / Cmd + Enter 发送</span>
-                        <button type="button" className="btn-primary" onClick={handleSend} disabled={sending || !draft.trim()}>
-                            {sending ? '发送中…' : '发送'}
-                        </button>
-                    </div>
-                </div>
-
-                {sessionRuns.length ? (
-                    <div className="subsection compact-subsection">
-                        <h3>运行记录</h3>
-                        <div className="list compact-list">
-                            {sessionRuns.slice(0, 6).map((run) => (
-                                <div key={run.id} className="list-row">
-                                    <div className="list-row-main">
-                                        <div className="list-row-title">{run.result_summary || '任务运行'}</div>
-                                        <div className="list-row-subtitle">
-                                            {translateScheduleMode(run.schedule_mode)} · {formatDateTime(run.started_at || run.scheduled_at)}
-                                        </div>
-                                    </div>
-                                    <div className="list-row-meta">
-                                        <span>{translateRunStatus(run.status)}</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                ) : null}
-            </section>
-
-            <div className="page-grid-2">
-                <section className="card">
-                    <div className="list-row-title">待审批</div>
-                    <div className="list compact-list" style={{ marginTop: 10 }}>
-                        {approvals.map((approval) => (
-                            <div key={approval.id} className="list-row">
-                                <div className="list-row-main">
-                                    <div className="list-row-title">{approval.summary || approval.reason || '审批请求'}</div>
-                                    <div className="list-row-subtitle">
-                                        风险 {approval.risk_level || '--'} · 截止 {formatDateTime(approval.expires_at)}
-                                    </div>
-                                </div>
-                                <div className="list-row-meta">
-                                    <span>{translateApprovalStatus(approval.status)}</span>
-                                    {approval.status === 'pending' ? (
-                                        <div className="table-actions">
-                                            <button
-                                                type="button"
-                                                className="btn-ghost"
-                                                onClick={() => handleApproval(approval.id, 'approved')}
-                                                disabled={approvalSubmittingId === approval.id}
-                                            >
-                                                批准
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="btn-ghost danger"
-                                                onClick={() => handleApproval(approval.id, 'rejected')}
-                                                disabled={approvalSubmittingId === approval.id}
-                                            >
-                                                拒绝
-                                            </button>
-                                        </div>
-                                    ) : null}
-                                </div>
-                            </div>
-                        ))}
-                        {!approvals.length ? <div className="empty-state">暂无待审批。</div> : null}
-                    </div>
-                </section>
-
-                <section className="card">
-                    <div className="list-row-title">巡检计划</div>
-                    {!scheduledTasks.length ? (
-                        <div className="action-row" style={{ marginTop: 10 }}>
-                            <button type="button" className="btn-primary" onClick={handleBootstrapDefaults} disabled={bootstrapping}>
-                                {bootstrapping ? '初始化中…' : '初始化默认巡检'}
-                            </button>
-                        </div>
-                    ) : null}
-                    <div className="list compact-list" style={{ marginTop: 10 }}>
-                        {scheduledTasks.map((task) => (
-                            <div key={task.id} className="list-row">
-                                <div className="list-row-main">
-                                    <div className="list-row-title">{task.name}</div>
-                                    <div className="list-row-subtitle">下次运行 {formatDateTime(task.next_run_at)}</div>
-                                </div>
-                                <div className="list-row-meta">
-                                    <button
-                                        type="button"
-                                        className="btn-ghost"
-                                        onClick={() => handleTaskTrigger(task.id)}
-                                        disabled={taskSubmittingId === `trigger:${task.id}`}
-                                    >
-                                        运行
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className="btn-ghost"
-                                        onClick={() => handleTaskToggle(task)}
-                                        disabled={taskSubmittingId === `toggle:${task.id}`}
-                                    >
-                                        {task.enabled ? '暂停' : '启用'}
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
-                        {!scheduledTasks.length ? <div className="empty-state">暂无巡检计划。</div> : null}
-                    </div>
-                </section>
+                </aside>
             </div>
         </div>
     );
