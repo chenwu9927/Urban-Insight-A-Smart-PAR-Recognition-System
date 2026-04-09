@@ -100,7 +100,7 @@ def _extract_text_body(message) -> str:
                     continue
         text = "\n\n".join(item for item in parts if item).strip()
         if text:
-            return text
+            return _normalize_email_body(text)
 
         for part in message.walk():
             content_type = (part.get_content_type() or "").lower()
@@ -112,7 +112,7 @@ def _extract_text_body(message) -> str:
                     html = part.get_content()
                 except Exception:
                     continue
-                return re.sub(r"<[^>]+>", " ", html or "").strip()
+                return _normalize_email_body(re.sub(r"<[^>]+>", " ", html or ""))
         return ""
 
     try:
@@ -131,6 +131,10 @@ def _normalize_email_body(value: str) -> str:
     signature_patterns = [
         re.compile(r"^\s*sent from my iphone\s*$", re.IGNORECASE),
         re.compile(r"^\s*sent from my ipad\s*$", re.IGNORECASE),
+        re.compile(r"^\s*发自我的iphone\s*$", re.IGNORECASE),
+        re.compile(r"^\s*发自我的ipad\s*$", re.IGNORECASE),
+        re.compile(r"^\s*来自我的iphone\s*$", re.IGNORECASE),
+        re.compile(r"^\s*来自我的ipad\s*$", re.IGNORECASE),
         re.compile(r"^\s*发自我的iPhone\s*$", re.IGNORECASE),
         re.compile(r"^\s*发自我的iPad\s*$", re.IGNORECASE),
         re.compile(r"^\s*从我的华为手机发送\s*$", re.IGNORECASE),
@@ -148,6 +152,21 @@ def _normalize_email_body(value: str) -> str:
     normalized = "\n".join(lines).strip()
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
     return normalized
+
+
+def _derive_email_title(subject: str, text: str) -> str:
+    preferred = str(subject or "").strip()
+    if preferred and preferred.lower() not in {"email task", "re:", "fw:", "fwd:"}:
+        return preferred[:120]
+
+    for raw_line in str(text or "").splitlines():
+        line = " ".join(raw_line.split()).strip()
+        if not line:
+            continue
+        if len(line) > 120:
+            line = line[:117].rstrip() + "..."
+        return line
+    return "邮件会话"
 
 
 def _normalize_email_address(value: str | None) -> str:
@@ -252,7 +271,8 @@ class EmailConnectorService:
 
     def ingest_email(self, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
         subject = str(payload.get("subject") or "").strip()
-        text = str(payload.get("text") or "").strip()
+        text = _normalize_email_body(str(payload.get("text") or "").strip())
+        display_title = _derive_email_title(subject, text)
         approval_id = str(payload.get("approval_id") or "").strip() or self._parse_approval_id(subject)
         decision = str(payload.get("decision") or "").strip() or _infer_decision(text)
 
@@ -280,13 +300,13 @@ class EmailConnectorService:
         else:
             session_payload = {
                 "kind": "command",
-                "title": subject or "Email Task",
+                "title": display_title,
                 "status": "active",
                 "source": "email",
                 "config_snapshot": {
                     "email": {
                         "from_address": payload.get("from_address"),
-                        "subject": subject,
+                        "subject": display_title,
                         "thread_key": payload.get("thread_key"),
                         "connector_message_id": payload.get("connector_message_id"),
                         "metadata": payload.get("metadata") or {},
@@ -311,6 +331,10 @@ class EmailConnectorService:
             "schedule_mode": "immediate",
             "permission_mode": "default",
             "prompt": text,
+            "input_payload": {
+                "action": "agent.chat",
+                "params": {"question": text},
+            },
         }
         action = str(payload.get("action") or "").strip()
         if action:
@@ -324,7 +348,7 @@ class EmailConnectorService:
         if recipient:
             self._send_and_record(
                 to_address=recipient,
-                subject=_subject_ack(subject or "Email Task"),
+                subject=_subject_ack(display_title),
                 body=f"Your task has been accepted.\n\nSession: {session['id']}\nRun: {run['id']}",
                 thread_key=str(payload.get("thread_key") or run["id"]),
                 dedup_key=f"email-ack:{run['id']}",

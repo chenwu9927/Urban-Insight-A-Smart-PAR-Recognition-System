@@ -488,7 +488,8 @@ class ApiOnlyExecutionService:
             "strategic_context": strategic_context or {},
         }
 
-        normalized = question.lower()
+        normalized = self._normalize_question_text(question)
+        available_tools = self._chat_tool_specs(question=question, strategic_context=strategic_context)
 
         overview, overview_summary = self._execute_action_with_retry(
             "agent.get_overview",
@@ -544,6 +545,24 @@ class ApiOnlyExecutionService:
         overview_data = overview.get("data") or {}
         runtime_data = runtime.get("data") or {}
         alert_list = (alerts.get("data") or {}).get("alerts") or []
+        if any(keyword in normalized for keyword in ("分析", "统计", "报告", "研判")):
+            try:
+                insight, insight_summary = self._execute_action_with_retry(
+                    "insights.ask",
+                    prompt=question,
+                    params={"question": question, "interval": 60, "use_llm": 1},
+                    session_id=session_id,
+                    strategic_context=strategic_context,
+                )
+                output["insight_answer"] = insight.get("data")
+                answer = str((insight.get("data") or {}).get("answer") or "").strip()
+                if answer and answer not in sections:
+                    sections.append(answer)
+                tool_events.append({"action": "insights.ask", "ok": True, "result_summary": insight_summary})
+            except Exception:
+                pass
+        if strategic_summary and any(keyword in normalized for keyword in ("策略", "长期", "风险", "strategy", "risk")) and strategic_summary not in sections:
+            sections.append(strategic_summary)
         concise_summary = self._build_chat_fallback_answer(
             question=question,
             overview=overview_data,
@@ -552,12 +571,18 @@ class ApiOnlyExecutionService:
         )
         if concise_summary:
             sections.insert(0, concise_summary)
+        if self._is_capability_question(normalized):
+            sections.append(self._build_capability_answer(available_tools))
+        if self._is_current_work_question(normalized):
+            current_work = self._build_current_work_answer(overview_data)
+            if current_work and current_work != concise_summary:
+                sections.append(current_work)
 
         plan = self.goal_planner.plan(
             question=question,
             answer="\n\n".join(section for section in sections if section).strip(),
             tool_events=tool_events,
-            available_tools=self._chat_tool_specs(question=question, strategic_context=strategic_context),
+            available_tools=available_tools,
             strategic_context=strategic_context,
             planner=None,
             force=False,
@@ -819,7 +844,10 @@ class ApiOnlyExecutionService:
             "insights.get_brief",
             "insights.ask",
             "search.nl",
+            "search.structured",
             "analysis.get_task",
+            "analysis.get_record",
+            "analysis.get_semantic_record",
             "patrol.analysis_backlog",
             "patrol.analysis_failures",
             "patrol.approval_timeout",
@@ -1288,7 +1316,7 @@ class ApiOnlyExecutionService:
         runtime_status: dict[str, Any],
         alerts: list[dict[str, Any]],
     ) -> str:
-        normalized = (question or "").lower()
+        normalized = self._normalize_question_text(question)
         counts = overview.get("counts") or {}
         loops = runtime_status.get("loops") or {}
         runtime_health = (loops.get("runtime") or {}).get("health") or "unknown"
@@ -1297,6 +1325,34 @@ class ApiOnlyExecutionService:
         active_runs = max(int(counts.get("active_runs", 0) or 0) - 1, 0)
         queued_runs = counts.get("queued_runs", 0)
         open_alerts = len(alerts or [])
+
+        if self._is_current_work_question(normalized):
+            current_work = self._build_current_work_answer(overview)
+            if current_work:
+                return current_work
+
+        if self._is_capability_question(normalized):
+            return (
+                "我可以读取运行状态、告警、会话、目标和分析结果，"
+                "也可以做统计简报、自然语言检索、结构化检索、巡查检查以及记忆读写。"
+            )
+
+        if any(keyword in normalized for keyword in ("正常", "状态", "工作", "运行", "在吗", "hi", "hello", "chat", "聊天", "你好", "您好", "？", "?")):
+            if open_alerts:
+                return (
+                    f"我在。当前执行循环 {runtime_health}，系统有 {open_alerts} 条活动告警，"
+                    f"排队任务 {queued_runs} 个。"
+                )
+            return (
+                f"我在。当前执行循环 {runtime_health}，调度循环 {scheduler_health}。"
+                + (f" 现在有 {queued_runs} 个排队任务。" if queued_runs else " 目前没有排队任务，也没有活动告警。")
+            )
+
+        if any(keyword in normalized for keyword in ("上传", "分析", "检索", "搜索", "文件", "任务")):
+            return (
+                f"当前上传、分析和检索主链可用。系统当前排队任务 {queued_runs} 个，"
+                f"执行循环 {runtime_health}，调度循环 {scheduler_health}，邮件循环 {email_health}。"
+            )
 
         if any(keyword in normalized for keyword in ("正常", "状态", "工作", "运行", "在吗", "hi", "hello", "chat", "聊天", "你好", "您好", "？", "?")):
             if open_alerts:
@@ -1328,6 +1384,95 @@ class ApiOnlyExecutionService:
         if active_runs:
             return f"我看到了你的问题。当前执行循环 {runtime_health}，还有 {active_runs} 个活跃任务在处理中。"
         return "我看到了你的问题。当前系统运行正常，没有活动告警。"
+
+    @staticmethod
+    def _normalize_question_text(value: str) -> str:
+        text = str(value or "").lower()
+        return " ".join(text.replace("\r", " ").replace("\n", " ").split())
+
+    @staticmethod
+    def _is_capability_question(normalized_question: str) -> bool:
+        return any(
+            keyword in normalized_question
+            for keyword in (
+                "能做什么",
+                "可以做什么",
+                "功能",
+                "工具",
+                "tool",
+                "tools",
+                "capability",
+                "能调用",
+                "调用哪些",
+            )
+        )
+
+    @staticmethod
+    def _is_current_work_question(normalized_question: str) -> bool:
+        return any(
+            keyword in normalized_question
+            for keyword in (
+                "在忙什么",
+                "忙什么",
+                "当前在做什么",
+                "现在在做什么",
+                "what are you doing",
+                "busy with",
+            )
+        )
+
+    def _build_capability_answer(self, available_tools: list[AgentToolSpec]) -> str:
+        category_labels = {
+            "orchestration": "运行与会话",
+            "insight": "统计与研判",
+            "search": "检索",
+            "analysis": "分析记录",
+            "patrol": "巡查",
+            "memory": "记忆",
+        }
+        grouped: dict[str, list[str]] = {}
+        for spec in available_tools:
+            label = category_labels.get(spec.category, spec.category)
+            grouped.setdefault(label, []).append(spec.action)
+
+        lines = ["我当前能直接调用这些工具："]
+        for label in ("运行与会话", "统计与研判", "检索", "分析记录", "巡查", "记忆"):
+            actions = grouped.get(label) or []
+            if actions:
+                lines.append(f"- {label}：{', '.join(actions[:6])}")
+        lines.append("你给我一个具体任务后，我会直接调用这些工具去查证并回答。")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _build_current_work_answer(overview: dict[str, Any]) -> str:
+        active_runs = overview.get("active_runs") or []
+        recent_goals = overview.get("recent_goals") or []
+        counts = overview.get("counts") or {}
+
+        if active_runs:
+            lines = ["我现在主要在处理这些任务："]
+            for run in active_runs[:3]:
+                title = str(run.get("session_title") or run.get("trigger_text") or run.get("id") or "未命名任务").strip()
+                status = str(run.get("status") or "unknown").strip()
+                summary = str(run.get("result_summary") or "").strip()
+                line = f"- {title}（{status}）"
+                if summary:
+                    line += f"：{summary}"
+                lines.append(line)
+            return "\n".join(lines)
+
+        if recent_goals:
+            lines = ["我现在没有即时执行中的任务，最近持续关注的是："]
+            for goal in recent_goals[:3]:
+                title = str(goal.get("title") or goal.get("summary") or goal.get("id") or "未命名目标").strip()
+                status = str(goal.get("status") or "unknown").strip()
+                lines.append(f"- {title}（{status}）")
+            return "\n".join(lines)
+
+        queued_runs = int(counts.get("queued_runs", 0) or 0)
+        if queued_runs:
+            return f"我现在没有活跃执行中的任务，但还有 {queued_runs} 个排队任务等待处理。"
+        return "我现在没有正在执行的任务，处于待命状态。"
 
     @staticmethod
     def _messages_end_with_prompt(messages: list[dict[str, Any]], prompt: str) -> bool:
