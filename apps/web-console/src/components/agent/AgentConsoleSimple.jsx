@@ -112,7 +112,7 @@ function AgentConsoleSimple({ user }) {
             agentApi.listSessions({ limit: 40, kind: 'command', source: 'web' }),
             agentApi.listApprovals({ limit: 20 }),
             agentApi.listScheduledTasks({ limit: 20 }),
-            agentApi.listAlerts({ limit: 20 }),
+            agentApi.listAlerts({ status: 'open', limit: 20 }),
         ]);
 
         const orderedSessions = sortSessions(nextSessions || []);

@@ -44,3 +44,4 @@ class EmailConnectorSettings:
         self.imap_use_ssl = _env_bool("AGENT_EMAIL_IMAP_USE_SSL", True)
         self.imap_mailbox = os.getenv("AGENT_EMAIL_IMAP_MAILBOX", "INBOX").strip() or "INBOX"
         self.state_path = Path(os.getenv("AGENT_EMAIL_STATE_PATH", "agent_email_state/imap-state.json"))
+        self.alert_lookback_hours = max(1, _env_int("AGENT_EMAIL_ALERT_LOOKBACK_HOURS", 24))

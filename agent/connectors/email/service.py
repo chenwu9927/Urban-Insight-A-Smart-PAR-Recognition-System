@@ -32,6 +32,20 @@ def utcnow() -> datetime.datetime:
     return datetime.datetime.utcnow()
 
 
+def _parse_datetime(value: Any) -> datetime.datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        parsed = datetime.datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
 def _infer_decision(text: str) -> str | None:
     value = (text or "").strip().lower()
     if not value:
@@ -503,8 +517,22 @@ class EmailConnectorService:
         if not subscriptions:
             return deliveries, details
 
-        open_alerts = self.control_plane.list_alerts(status="open", scope_type="service_loop", limit=100)
-        resolved_alerts = self.control_plane.list_alerts(status="resolved", scope_type="service_loop", limit=100)
+        lookback_cutoff = utcnow() - datetime.timedelta(hours=self.settings.alert_lookback_hours)
+
+        open_alerts = [
+            alert
+            for alert in self.control_plane.list_alerts(status="open", scope_type="service_loop", limit=50)
+            if (_parse_datetime(alert.get("detected_at")) or utcnow()) >= lookback_cutoff
+        ]
+        resolved_alerts = [
+            alert
+            for alert in self.control_plane.list_alerts(status="resolved", scope_type="service_loop", limit=50)
+            if (
+                _parse_datetime(alert.get("updated_at"))
+                or _parse_datetime(alert.get("detected_at"))
+                or utcnow()
+            ) >= lookback_cutoff
+        ]
 
         for alert in open_alerts:
             for subscription in subscriptions:
