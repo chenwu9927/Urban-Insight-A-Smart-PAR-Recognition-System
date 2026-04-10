@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { formatDateTime } from '../lib/time';
@@ -67,6 +67,8 @@ const colorLabels = {
     Yellow: '黄色',
 };
 
+const ACTIVE_TASK_STATUSES = new Set(['queued', 'running']);
+
 function getAccessoryTags(attributes) {
     const tags = [];
     if (attributes?.has_backpack) tags.push('背包');
@@ -102,9 +104,9 @@ function TaskDetail() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    useEffect(() => {
-        const loadDetail = async () => {
-            setLoading(true);
+    const loadDetail = useCallback(
+        async ({ silent = false } = {}) => {
+            if (!silent) setLoading(true);
             setError('');
             try {
                 const [filesResponse, tasksResponse] = await Promise.all([
@@ -115,7 +117,9 @@ function TaskDetail() {
                 const currentFile = (filesResponse.data || []).find((item) => String(item.id) === String(fileId));
                 if (!currentFile) {
                     setError('没有找到这个文件。');
-                    setLoading(false);
+                    setRecord(null);
+                    setTasks([]);
+                    setFile(null);
                     return;
                 }
 
@@ -135,14 +139,28 @@ function TaskDetail() {
                 console.error('Failed to load task detail', loadError);
                 setError('任务详情加载失败。');
             } finally {
-                setLoading(false);
+                if (!silent) setLoading(false);
             }
-        };
+        },
+        [fileId],
+    );
 
+    useEffect(() => {
         void loadDetail();
-    }, [fileId]);
+    }, [loadDetail]);
 
     const latestTask = tasks[0] || null;
+    const hasActiveTask = ACTIVE_TASK_STATUSES.has(latestTask?.status) || file?.status === 'processing';
+
+    useEffect(() => {
+        if (!hasActiveTask) {
+            return undefined;
+        }
+        const timer = window.setInterval(() => {
+            void loadDetail({ silent: true });
+        }, 3000);
+        return () => window.clearInterval(timer);
+    }, [hasActiveTask, loadDetail]);
 
     const summaryItems = [
         { label: '文件', value: getFileTypeLabel(file?.file_type) },
@@ -171,6 +189,11 @@ function TaskDetail() {
                 <button type="button" className="btn-ghost" onClick={() => navigate('/files')}>
                     返回任务中心
                 </button>
+                {hasActiveTask ? (
+                    <button type="button" className="btn-ghost" onClick={() => void loadDetail()} disabled={loading}>
+                        {loading ? '刷新中…' : '立即刷新'}
+                    </button>
+                ) : null}
                 {record?.record_id ? (
                     <button type="button" className="btn-ghost" onClick={() => navigate(`/history`, { state: { recordId: record.record_id } })}>
                         查看报告
@@ -200,11 +223,12 @@ function TaskDetail() {
                                 ))}
                             </div>
                         </div>
-                        <div className="brief-panel" style={{ marginTop: 16 }}>
-                            <p>{summaryText}</p>
-                            {record?.video_insights?.risk_level ? <span className="page-chip">风险 {record.video_insights.risk_level}</span> : null}
-                        </div>
-                    </section>
+                            <div className="brief-panel" style={{ marginTop: 16 }}>
+                                <p>{summaryText}</p>
+                                {record?.video_insights?.risk_level ? <span className="page-chip">风险 {record.video_insights.risk_level}</span> : null}
+                                {hasActiveTask ? <span className="page-chip">结果生成中，页面会自动刷新</span> : null}
+                            </div>
+                        </section>
 
                     <div className="page-grid-2">
                         <section className="card">

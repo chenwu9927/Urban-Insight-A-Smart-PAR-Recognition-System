@@ -388,14 +388,14 @@ function AgentConsoleSimple({ user }) {
                             onChange={(event) => setDraft(event.target.value)}
                             placeholder="例如：总结当前异常、检查系统状态、解释一段视频。"
                             onKeyDown={(event) => {
-                                if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                                if (event.key === 'Enter' && !event.shiftKey) {
                                     event.preventDefault();
                                     void handleSend();
                                 }
                             }}
                         />
                         <div className="action-row">
-                            <span className="composer-tip">Ctrl / Cmd + Enter 发送</span>
+                            <span className="composer-tip">Enter 发送，Shift + Enter 换行</span>
                             <button type="button" className="btn-primary" onClick={handleSend} disabled={sending || !draft.trim()}>
                                 {sending ? '发送中…' : '发送'}
                             </button>

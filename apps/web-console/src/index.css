@@ -864,8 +864,8 @@ pre {
 }
 
 .message-list {
-  min-height: 420px;
-  max-height: 68vh;
+  min-height: 520px;
+  max-height: 72vh;
   overflow: auto;
   padding: 16px;
   display: flex;
@@ -938,16 +938,20 @@ pre {
 
 .composer textarea {
   width: 100%;
-  min-height: 96px;
+  min-height: 128px;
   border: none;
   resize: vertical;
   background: transparent;
   color: var(--text);
 }
 
+.agent-console-shell {
+  gap: 14px;
+}
+
 .agent-console-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.75fr) minmax(300px, 0.85fr);
+  grid-template-columns: minmax(0, 2.1fr) minmax(280px, 0.72fr);
   gap: 16px;
   align-items: start;
 }

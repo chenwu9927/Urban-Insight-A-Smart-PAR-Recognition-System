@@ -55,6 +55,24 @@ function History() {
         void fetchReport(targetRecordId);
     }, [fetchReport, records, selectedId, targetRecordId]);
 
+    useEffect(() => {
+        if (!records.length) {
+            if (selectedId !== null) {
+                setSelectedId(null);
+                setReport(null);
+                setReportError('');
+            }
+            return;
+        }
+        if (targetRecordId && records.some((record) => record.id === targetRecordId)) {
+            return;
+        }
+        if (selectedId && records.some((record) => record.id === selectedId)) {
+            return;
+        }
+        void fetchReport(records[0].id);
+    }, [fetchReport, records, selectedId, targetRecordId]);
+
     const handleUseLLMChange = (checked) => {
         setUseLLM(checked);
         if (selectedId) {
@@ -68,17 +86,25 @@ function History() {
         }
         try {
             await api.delete(`/history/${id}`);
-            setRecords((current) => current.filter((record) => record.id !== id));
+            const nextRecords = records.filter((record) => record.id !== id);
+            setRecords(nextRecords);
             if (selectedId === id) {
-                setSelectedId(null);
-                setReport(null);
-                setReportError('');
+                const nextRecordId = nextRecords[0]?.id || null;
+                if (nextRecordId) {
+                    void fetchReport(nextRecordId);
+                } else {
+                    setSelectedId(null);
+                    setReport(null);
+                    setReportError('');
+                }
             }
         } catch (error) {
             console.error('Failed to delete record', error);
             window.alert('删除失败。');
         }
     };
+
+    const selectedRecord = records.find((record) => record.id === selectedId) || null;
 
     const summaryItems = useMemo(() => {
         if (!report?.report) {
@@ -129,7 +155,7 @@ function History() {
 
                 <section className="card">
                     <div className="card-title-row">
-                        <h2 className="card-title">{selectedId ? `记录 #${selectedId}` : '报告预览'}</h2>
+                        <h2 className="card-title">{selectedRecord?.filename || (selectedId ? `记录 #${selectedId}` : '报告预览')}</h2>
                         <div className="table-actions">
                             <label className="checkbox-row">
                                 <input type="checkbox" checked={useLLM} onChange={(event) => handleUseLLMChange(event.target.checked)} />
