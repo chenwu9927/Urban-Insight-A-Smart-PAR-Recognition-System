@@ -12,6 +12,12 @@ const emptyUploadState = {
     pipeline: 'classic_cv',
 };
 
+function isVideoFile(file) {
+    if (!file) return false;
+    if (file.type?.startsWith('video/')) return true;
+    return /\.(mp4|mov|avi|mkv|webm)$/i.test(file.name || '');
+}
+
 function formatBytes(value) {
     const size = Number(value);
     if (!Number.isFinite(size) || size <= 0) return '0 B';
@@ -117,14 +123,24 @@ function FileLibrary() {
 
     const recentTasks = analysisTasks.slice(0, 6);
 
+    const resetUploadDraft = () => {
+        setUploadDraft(emptyUploadState);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+    };
+
     const handleChooseFile = () => {
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
         fileInputRef.current?.click();
     };
 
     const handleFilePicked = (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
-        const isVideo = file.type?.startsWith('video/');
+        const isVideo = isVideoFile(file);
         setUploadDraft({
             file,
             startTime: isVideo ? toLocalInputValue(new Date()) : '',
@@ -157,8 +173,7 @@ function FileLibrary() {
                 });
             }
 
-            setUploadDraft(emptyUploadState);
-            if (fileInputRef.current) fileInputRef.current.value = '';
+            resetUploadDraft();
             setLibraryNotice(`${createdFile?.filename || '文件'}上传成功。`);
             await loadLibrary();
         } catch (error) {
@@ -168,6 +183,14 @@ function FileLibrary() {
             setUploading(false);
         }
     };
+
+    const uploadPipelineOptions = isVideoFile(uploadDraft.file)
+        ? [
+              { value: 'classic_cv', label: '结构化识别' },
+              { value: 'semantic_vlm', label: '语义研判' },
+              { value: 'dual', label: '双工作流' },
+          ]
+        : [{ value: 'classic_cv', label: '结构化识别' }];
 
     const handleAnalyze = async (file) => {
         if (!file || actionFileId === file.id) return;
@@ -222,12 +245,14 @@ function FileLibrary() {
                                     setUploadDraft((current) => ({ ...current, pipeline: event.target.value }))
                                 }
                             >
-                                <option value="classic_cv">结构化识别</option>
-                                <option value="semantic_vlm">语义研判</option>
-                                <option value="dual">双工作流</option>
+                                {uploadPipelineOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
                             </select>
                         </div>
-                        {uploadDraft.file.type?.startsWith('video/') ? (
+                        {isVideoFile(uploadDraft.file) ? (
                             <div className="form-field">
                                 <label>视频开始时间</label>
                                 <input
@@ -253,7 +278,7 @@ function FileLibrary() {
                             <button type="button" className="btn-primary" onClick={handleUpload} disabled={uploading}>
                                 {uploading ? '上传中…' : '开始上传'}
                             </button>
-                            <button type="button" className="btn-ghost" onClick={() => setUploadDraft(emptyUploadState)}>
+                            <button type="button" className="btn-ghost" onClick={resetUploadDraft}>
                                 取消
                             </button>
                         </div>
