@@ -89,7 +89,11 @@ def list_runs(
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    query = db.query(AgentRun)
+    query = (
+        db.query(AgentRun)
+        .join(AgentSession, AgentSession.id == AgentRun.session_id)
+        .filter(AgentSession.is_deleted == False)  # noqa: E712
+    )
     if status:
         query = query.filter(AgentRun.status == status)
     if session_id:
@@ -103,7 +107,7 @@ def list_runs(
     if claimed_by:
         query = query.filter(AgentRun.claimed_by == claimed_by)
     if source:
-        query = query.join(AgentSession, AgentSession.id == AgentRun.session_id).filter(AgentSession.source == source)
+        query = query.filter(AgentSession.source == source)
     return query.order_by(AgentRun.created_at.desc()).limit(limit).all()
 
 

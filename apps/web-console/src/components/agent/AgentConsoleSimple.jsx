@@ -25,11 +25,11 @@ function AgentConsoleSimple({ user }) {
     const [runtimeStatus, setRuntimeStatus] = useState(null);
     const [unifiedMessages, setUnifiedMessages] = useState([]);
     const [sessions, setSessions] = useState([]);
+    const [sessionRuns, setSessionRuns] = useState([]);
     const [approvals, setApprovals] = useState([]);
     const [scheduledTasks, setScheduledTasks] = useState([]);
     const [runtimeAlerts, setRuntimeAlerts] = useState([]);
     const [primarySessionId, setPrimarySessionId] = useState('');
-    const [sessionRuns, setSessionRuns] = useState([]);
     const [loading, setLoading] = useState(true);
     const [conversationLoading, setConversationLoading] = useState(false);
     const [sending, setSending] = useState(false);
@@ -75,6 +75,7 @@ function AgentConsoleSimple({ user }) {
         () =>
             sessions.find((item) => item.id === primarySessionId) ||
             sessions.find((item) => item.source === 'web' && item.kind === 'command') ||
+            sessions[0] ||
             null,
         [primarySessionId, sessions],
     );
@@ -91,7 +92,7 @@ function AgentConsoleSimple({ user }) {
         () => [
             { label: '活跃任务', value: overview?.counts?.active_runs ?? 0 },
             { label: '待审批', value: overview?.counts?.pending_approvals ?? 0 },
-            { label: '开放告警', value: runtimeAlerts.filter((item) => item.status === 'open').length },
+            { label: '开放告警', value: runtimeAlerts.length },
         ],
         [overview, runtimeAlerts],
     );
@@ -100,7 +101,7 @@ function AgentConsoleSimple({ user }) {
     const activeRuns = (overview?.active_runs || []).slice(0, 4);
     const recentApprovals = approvals.slice(0, 3);
     const recentTasks = scheduledTasks.slice(0, 3);
-    const openAlerts = runtimeAlerts.filter((item) => item.status === 'open').slice(0, 3);
+    const openAlerts = runtimeAlerts.slice(0, 3);
 
     const loadConversation = useCallback(async (sessionId, { background = false } = {}) => {
         if (!background) setConversationLoading(true);
@@ -110,13 +111,14 @@ function AgentConsoleSimple({ user }) {
                 agentApi.listSessions({ limit: 24, kind: 'command' }),
                 sessionId ? agentApi.listRuns({ session_id: sessionId, limit: 20 }) : Promise.resolve([]),
             ]);
-            setUnifiedMessages(nextMessages || []);
-            setSessions(nextSessions || []);
-            setSessionRuns(nextRuns || []);
-            const nextPendingRun = (nextRuns || []).find((item) =>
+            setUnifiedMessages(Array.isArray(nextMessages) ? nextMessages : nextMessages?.items || []);
+            setSessions(Array.isArray(nextSessions) ? nextSessions : nextSessions?.items || []);
+            setSessionRuns(Array.isArray(nextRuns) ? nextRuns : nextRuns?.items || []);
+            const nextPendingRun = (Array.isArray(nextRuns) ? nextRuns : nextRuns?.items || []).find((item) =>
                 ['queued', 'claimed', 'running', 'waiting_approval', 'waiting_input'].includes(item?.status),
             );
-            setPendingRunId(nextPendingRun?.id || '');
+            setPendingRunId(nextPendingRun?.id || nextPendingRun?.run_id || '');
+            setError('');
         } catch (loadError) {
             console.error('Failed to load agent conversation', loadError);
             setError('对话内容加载失败。');
@@ -136,9 +138,9 @@ function AgentConsoleSimple({ user }) {
 
         setOverview(nextOverview || null);
         setRuntimeStatus(nextRuntime || null);
-        setApprovals(nextApprovals || []);
-        setScheduledTasks(nextTasks || []);
-        setRuntimeAlerts(nextAlerts || []);
+        setApprovals(Array.isArray(nextApprovals) ? nextApprovals : nextApprovals?.items || []);
+        setScheduledTasks(Array.isArray(nextTasks) ? nextTasks : nextTasks?.items || []);
+        setRuntimeAlerts(Array.isArray(nextAlerts) ? nextAlerts : nextAlerts?.items || []);
     }, []);
 
     const refreshAll = useCallback(async () => {
@@ -169,12 +171,15 @@ function AgentConsoleSimple({ user }) {
     }, [primarySessionId, sessions]);
 
     useEffect(() => {
+        if (!primarySessionId) return;
         void loadConversation(primarySessionId);
     }, [loadConversation, primarySessionId]);
 
     useEffect(() => {
         const timer = window.setInterval(() => {
-            void loadConversation(primarySessionId, { background: true });
+            if (primarySessionId) {
+                void loadConversation(primarySessionId, { background: true });
+            }
         }, activeSessionRun || pendingRunId ? ACTIVE_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
         return () => window.clearInterval(timer);
     }, [activeSessionRun, loadConversation, pendingRunId, primarySessionId]);
@@ -217,7 +222,7 @@ function AgentConsoleSimple({ user }) {
             if (!sessionId) {
                 const newSession = await agentApi.createSession({
                     kind: 'command',
-                    title: '运营对话',
+                    title: '统一对话',
                     status: 'active',
                     source: 'web',
                     owner_user_id: user?.id || null,
@@ -234,7 +239,7 @@ function AgentConsoleSimple({ user }) {
                 created_by_user_id: user?.id || null,
             });
 
-            setPendingRunId(run?.id || '');
+            setPendingRunId(run?.id || run?.run_id || '');
             setDraft('');
             await Promise.all([loadOverview(), loadConversation(sessionId, { background: true })]);
         } catch (sendError) {
@@ -330,9 +335,7 @@ function AgentConsoleSimple({ user }) {
                     <div className="agent-chat-header">
                         <div>
                             <div className="list-row-title">对话</div>
-                            <div className="list-row-subtitle">
-                                邮件与网页消息会统一显示在这里，时间统一按东八区展示。
-                            </div>
+                            <div className="list-row-subtitle">网页和邮件消息会统一显示在这里，时间按东八区展示。</div>
                         </div>
                     </div>
 
@@ -350,9 +353,7 @@ function AgentConsoleSimple({ user }) {
                                     >
                                         <div className="message-meta-row">
                                             <span className="message-role">{translateRole(message.role)}</span>
-                                            <span className="message-source-tag">
-                                                {translateSource(message.session_source)}
-                                            </span>
+                                            <span className="message-source-tag">{translateSource(message.session_source)}</span>
                                             <span className="message-session-title">
                                                 {getSessionTitle({
                                                     title: message.session_title,

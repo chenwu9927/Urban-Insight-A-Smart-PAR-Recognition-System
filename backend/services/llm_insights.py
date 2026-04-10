@@ -446,15 +446,31 @@ def generate_record_report(record_summary: Dict[str, Any], *, allow_llm: bool = 
     """
     def fallback() -> Dict[str, Any]:
         meta = record_summary.get("meta") or {}
+        ped_count = int(meta.get("pedestrian_count") or 0)
+        semantic_count = int(meta.get("semantic_result_count") or 0)
+        window_count = int(meta.get("window_summary_count") or 0)
+        filename = meta.get("filename") or "未命名文件"
+        summary_parts = [f"文件 {filename}："]
+        if ped_count > 0:
+            summary_parts.append(f"识别 {ped_count} 人。")
+        elif window_count > 0:
+            summary_parts.append(f"生成 {window_count} 个语义时间窗。")
+        elif semantic_count > 0:
+            summary_parts.append(f"生成 {semantic_count} 条语义描述。")
+        else:
+            summary_parts.append("暂无可用识别结果。")
+        risk_level = str(meta.get("risk_level") or "").strip()
+        if risk_level:
+            summary_parts.append(f"风险等级 {risk_level}。")
         return {
             "llm_used": False,
             "record_id": meta.get("record_id"),
-            "summary": f"文件 {meta.get('filename')}：识别 {meta.get('pedestrian_count', 0)} 人。",
+            "summary": "".join(summary_parts),
             "key_findings": record_summary.get("highlights") or [],
             "anomalies": [],
             "recommendations": [
                 "如需更强的文字报告，请配置 LLM_API_KEY。",
-                "可进一步按时段/点位拆分对比。",
+                "可进一步按时段、点位或语义时间窗拆分对比。",
             ],
         }
 

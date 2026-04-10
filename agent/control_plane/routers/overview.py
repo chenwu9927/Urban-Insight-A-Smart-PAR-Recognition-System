@@ -84,21 +84,21 @@ def get_agent_overview(
         "active_runs": (
             db.query(func.count(AgentRun.id))
             .join(AgentSession, AgentSession.id == AgentRun.session_id)
-            .filter(AgentRun.status.in_(active_statuses), operator_session_filter)
+            .filter(AgentSession.is_deleted == False, AgentRun.status.in_(active_statuses), operator_session_filter)  # noqa: E712
             .scalar()
             or 0
         ),
         "queued_runs": (
             db.query(func.count(AgentRun.id))
             .join(AgentSession, AgentSession.id == AgentRun.session_id)
-            .filter(AgentRun.status == "queued", operator_session_filter)
+            .filter(AgentSession.is_deleted == False, AgentRun.status == "queued", operator_session_filter)  # noqa: E712
             .scalar()
             or 0
         ),
         "waiting_approval_runs": (
             db.query(func.count(AgentRun.id))
             .join(AgentSession, AgentSession.id == AgentRun.session_id)
-            .filter(AgentRun.status == "waiting_approval", operator_session_filter)
+            .filter(AgentSession.is_deleted == False, AgentRun.status == "waiting_approval", operator_session_filter)  # noqa: E712
             .scalar()
             or 0
         ),
@@ -109,6 +109,7 @@ def get_agent_overview(
                 AgentRun.status == "completed",
                 AgentRun.finished_at != None,  # noqa: E711
                 AgentRun.finished_at >= day_ago,
+                AgentSession.is_deleted == False,  # noqa: E712
                 operator_session_filter,
             )
             .scalar()
@@ -121,6 +122,7 @@ def get_agent_overview(
                 AgentRun.status == "failed",
                 AgentRun.finished_at != None,  # noqa: E711
                 AgentRun.finished_at >= day_ago,
+                AgentSession.is_deleted == False,  # noqa: E712
                 operator_session_filter,
             )
             .scalar()
@@ -132,6 +134,7 @@ def get_agent_overview(
             .join(AgentSession, AgentSession.id == AgentGoal.session_id)
             .filter(
                 AgentGoal.status.in_(["planned", "running", "replanning", "blocked", "pending_verification", "verifying", "recovering"]),
+                AgentSession.is_deleted == False,  # noqa: E712
                 operator_session_filter,
             )
             .scalar()
@@ -140,7 +143,7 @@ def get_agent_overview(
         "blocked_goals": (
             db.query(func.count(AgentGoal.id))
             .join(AgentSession, AgentSession.id == AgentGoal.session_id)
-            .filter(AgentGoal.status == "blocked", operator_session_filter)
+            .filter(AgentSession.is_deleted == False, AgentGoal.status == "blocked", operator_session_filter)  # noqa: E712
             .scalar()
             or 0
         ),
@@ -153,7 +156,7 @@ def get_agent_overview(
         db.query(AgentRun, AgentSession, AgentMessage)
         .outerjoin(AgentSession, AgentSession.id == AgentRun.session_id)
         .outerjoin(AgentMessage, AgentMessage.id == AgentRun.trigger_message_id)
-        .filter(AgentRun.status.in_(active_statuses), operator_session_filter)
+        .filter(AgentSession.is_deleted == False, AgentRun.status.in_(active_statuses), operator_session_filter)  # noqa: E712
         .order_by(AgentRun.created_at.asc())
         .limit(active_limit)
         .all()
@@ -162,7 +165,7 @@ def get_agent_overview(
         db.query(AgentRun, AgentSession, AgentMessage)
         .outerjoin(AgentSession, AgentSession.id == AgentRun.session_id)
         .outerjoin(AgentMessage, AgentMessage.id == AgentRun.trigger_message_id)
-        .filter(operator_session_filter)
+        .filter(AgentSession.is_deleted == False, operator_session_filter)  # noqa: E712
         .order_by(AgentRun.created_at.desc())
         .limit(recent_limit)
         .all()
@@ -170,7 +173,7 @@ def get_agent_overview(
     pending_approvals = (
         db.query(AgentApprovalRequest, AgentSession)
         .outerjoin(AgentSession, AgentSession.id == AgentApprovalRequest.session_id)
-        .filter(AgentApprovalRequest.status == "pending")
+        .filter(AgentApprovalRequest.status == "pending", AgentSession.is_deleted == False)  # noqa: E712
         .order_by(AgentApprovalRequest.created_at.asc())
         .limit(10)
         .all()
@@ -185,7 +188,7 @@ def get_agent_overview(
     recent_goals = (
         db.query(AgentGoal)
         .join(AgentSession, AgentSession.id == AgentGoal.session_id)
-        .filter(operator_session_filter)
+        .filter(AgentSession.is_deleted == False, operator_session_filter)  # noqa: E712
         .order_by(AgentGoal.updated_at.desc(), AgentGoal.created_at.desc())
         .limit(8)
         .all()

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { agentApi, api } from '../lib/api';
+import { formatDateInputValue } from '../lib/time';
 
 function Dashboard() {
     const navigate = useNavigate();
-    const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+    const today = useMemo(() => formatDateInputValue(new Date()), []);
     const [stats, setStats] = useState({
         total_analyses: 0,
         total_pedestrians: 0,

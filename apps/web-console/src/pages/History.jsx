@@ -1,21 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 import { formatDateTime } from '../lib/time';
 
 function History() {
+    const location = useLocation();
     const [records, setRecords] = useState([]);
     const [selectedId, setSelectedId] = useState(null);
     const [report, setReport] = useState(null);
     const [reportLoading, setReportLoading] = useState(false);
     const [reportError, setReportError] = useState('');
+    const [historyError, setHistoryError] = useState('');
     const [useLLM, setUseLLM] = useState(true);
+    const targetRecordId = Number(location.state?.recordId) || null;
 
     const fetchHistory = useCallback(async () => {
         try {
             const response = await api.get('/history');
             setRecords(response.data || []);
+            setHistoryError('');
         } catch (error) {
             console.error('Failed to fetch history', error);
+            setHistoryError('分析记录加载失败。');
         }
     }, []);
 
@@ -24,13 +30,13 @@ function History() {
     }, [fetchHistory]);
 
     const fetchReport = useCallback(
-        async (id, { refresh = false } = {}) => {
+        async (id, { refresh = false, llmEnabled = useLLM } = {}) => {
             setSelectedId(id);
             setReport(null);
             setReportError('');
             setReportLoading(true);
             try {
-                const response = await api.get(`/history/${id}/report?use_llm=${useLLM ? 1 : 0}&refresh=${refresh ? 1 : 0}`);
+                const response = await api.get(`/history/${id}/report?use_llm=${llmEnabled ? 1 : 0}&refresh=${refresh ? 1 : 0}`);
                 setReport(response.data || null);
             } catch (error) {
                 console.error('Failed to fetch report', error);
@@ -41,6 +47,20 @@ function History() {
         },
         [useLLM],
     );
+
+    useEffect(() => {
+        if (!targetRecordId || !records.some((record) => record.id === targetRecordId) || selectedId === targetRecordId) {
+            return;
+        }
+        void fetchReport(targetRecordId);
+    }, [fetchReport, records, selectedId, targetRecordId]);
+
+    const handleUseLLMChange = (checked) => {
+        setUseLLM(checked);
+        if (selectedId) {
+            void fetchReport(selectedId, { llmEnabled: checked });
+        }
+    };
 
     const handleDelete = async (id) => {
         if (!window.confirm('确定删除这条分析记录吗？')) {
@@ -65,7 +85,14 @@ function History() {
             return [];
         }
         return [
-            { label: '行人数', value: report.report?.meta?.pedestrian_count ?? '--' },
+            {
+                label: '结果数',
+                value:
+                    report.report?.meta?.pedestrian_count ||
+                    report.report?.meta?.semantic_result_count ||
+                    report.report?.meta?.window_summary_count ||
+                    '--',
+            },
             { label: '重点发现', value: report.report?.key_findings?.length ?? 0 },
             { label: '异常项', value: report.report?.anomalies?.length ?? 0 },
         ];
@@ -73,37 +100,24 @@ function History() {
 
     return (
         <div className="page-shell">
-            <section className="page-toolbar">
-                <div className="page-header-actions">
-                    <label className="checkbox-field">
-                        <input type="checkbox" checked={useLLM} onChange={(event) => setUseLLM(event.target.checked)} />
-                        <span>生成报告时使用模型</span>
-                    </label>
-                </div>
-            </section>
-
+            {historyError ? <div className="notice error">{historyError}</div> : null}
             <div className="page-grid-2">
                 <section className="card">
-                    <div className="card-header">
-                        <div>
-                            <h2 className="card-title">分析记录</h2>
-                        </div>
-                    </div>
-
-                    <div className="list compact-list">
+                    <div className="list-row-title">分析记录</div>
+                    <div className="list compact-list" style={{ marginTop: 12 }}>
                         {records.map((record) => (
                             <div key={record.id} className={`list-row ${selectedId === record.id ? 'selected' : ''}`}>
-                                <div className="list-row-main">
-                                    <div className="list-row-title">{record.filename}</div>
+                                <div className="list-row-main" onClick={() => void fetchReport(record.id)} role="button" tabIndex={0}>
+                                    <div className="list-row-title">{record.filename || `记录 #${record.id}`}</div>
                                     <div className="list-row-subtitle">
-                                        {formatDateTime(record.upload_time)} · 行人数 {record.pedestrian_count}
+                                        {formatDateTime(record.upload_time)} · {record.camera_location || '未标注点位'}
                                     </div>
                                 </div>
                                 <div className="list-row-meta">
-                                    <button type="button" className="btn-ghost" onClick={() => fetchReport(record.id)}>
+                                    <button type="button" className="btn-ghost" onClick={() => void fetchReport(record.id)}>
                                         查看
                                     </button>
-                                    <button type="button" className="btn-ghost danger" onClick={() => handleDelete(record.id)}>
+                                    <button type="button" className="btn-ghost danger" onClick={() => void handleDelete(record.id)}>
                                         删除
                                     </button>
                                 </div>
@@ -114,20 +128,19 @@ function History() {
                 </section>
 
                 <section className="card">
-                    <div className="card-header">
-                        <div>
-                            <h2 className="card-title">{selectedId ? `记录 #${selectedId}` : '报告预览'}</h2>
+                    <div className="card-title-row">
+                        <h2 className="card-title">{selectedId ? `记录 #${selectedId}` : '报告预览'}</h2>
+                        <div className="table-actions">
+                            <label className="checkbox-row">
+                                <input type="checkbox" checked={useLLM} onChange={(event) => handleUseLLMChange(event.target.checked)} />
+                                <span>使用模型</span>
+                            </label>
+                            {selectedId ? (
+                                <button type="button" className="btn-ghost" onClick={() => void fetchReport(selectedId, { refresh: true })}>
+                                    {reportLoading ? '生成中…' : '重新生成'}
+                                </button>
+                            ) : null}
                         </div>
-                        {selectedId ? (
-                            <button
-                                type="button"
-                                className="btn-primary"
-                                onClick={() => fetchReport(selectedId, { refresh: true })}
-                                disabled={reportLoading}
-                            >
-                                {reportLoading ? '生成中…' : '重新生成'}
-                            </button>
-                        ) : null}
                     </div>
 
                     {!selectedId ? <div className="empty-state">选择一条记录后查看报告。</div> : null}
@@ -135,49 +148,51 @@ function History() {
                     {reportError ? <div className="notice error">{reportError}</div> : null}
 
                     {!reportLoading && !reportError && report?.report ? (
-                        <>
-                            <section className="card subtle-card compact-card">
-                                <div className="compact-summary">
-                                    {summaryItems.map((item) => (
-                                        <div key={item.label} className="compact-metric">
-                                            <span>{item.label}</span>
-                                            <strong>{item.value}</strong>
-                                        </div>
-                                    ))}
-                                    <div className="compact-metric is-muted">
-                                        <span>生成方式</span>
-                                        <strong>{report.llm_used ? '模型' : '规则'}</strong>
+                        <div className="report-stack">
+                            <div className="compact-summary">
+                                {summaryItems.map((item) => (
+                                    <div key={item.label} className="compact-metric">
+                                        <span>{item.label}</span>
+                                        <strong>{item.value}</strong>
                                     </div>
+                                ))}
+                                <div className="compact-metric is-muted">
+                                    <span>生成方式</span>
+                                    <strong>{report.llm_used ? '模型' : '规则'}</strong>
                                 </div>
+                            </div>
+
+                            <section className="brief-panel">
+                                <h3>摘要</h3>
+                                <p>{report.report.summary || '暂无摘要。'}</p>
                             </section>
 
-                            <div className="brief-panel">
-                                <p className="prose-block">{report.report.summary || '当前没有可展示的摘要。'}</p>
-                            </div>
+                            <section>
+                                <h3>重点发现</h3>
+                                {(report.report.key_findings || []).length ? (
+                                    <ul className="bullet-list">
+                                        {report.report.key_findings.map((item, index) => (
+                                            <li key={`${item}-${index}`}>{item}</li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <div className="empty-state">暂无重点发现。</div>
+                                )}
+                            </section>
 
-                            <div className="page-grid-2 inner-grid">
-                                <div className="card subtle-card">
-                                    <h3>重点发现</h3>
-                                    <ul className="simple-list">
-                                        {(report.report.key_findings || []).length ? (
-                                            report.report.key_findings.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)
-                                        ) : (
-                                            <li>暂无重点发现。</li>
-                                        )}
+                            <section>
+                                <h3>建议动作</h3>
+                                {(report.report.recommendations || []).length ? (
+                                    <ul className="bullet-list">
+                                        {report.report.recommendations.map((item, index) => (
+                                            <li key={`${item}-${index}`}>{item}</li>
+                                        ))}
                                     </ul>
-                                </div>
-                                <div className="card subtle-card">
-                                    <h3>建议动作</h3>
-                                    <ul className="simple-list">
-                                        {(report.report.recommendations || []).length ? (
-                                            report.report.recommendations.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)
-                                        ) : (
-                                            <li>暂无建议动作。</li>
-                                        )}
-                                    </ul>
-                                </div>
-                            </div>
-                        </>
+                                ) : (
+                                    <div className="empty-state">暂无建议动作。</div>
+                                )}
+                            </section>
+                        </div>
                     ) : null}
                 </section>
             </div>

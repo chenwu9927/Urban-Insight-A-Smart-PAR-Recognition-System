@@ -1,15 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
-
-function formatDateTime(value) {
-    if (!value) return '--';
-    try {
-        return new Date(value).toLocaleString('zh-CN');
-    } catch {
-        return value;
-    }
-}
+import { formatDateTime } from '../lib/time';
 
 function formatTime(seconds) {
     if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
@@ -84,6 +76,23 @@ function getAccessoryTags(attributes) {
     return tags;
 }
 
+function getRecordResultCount(record) {
+    if (!record) return '--';
+    if (Number.isFinite(record.pedestrian_count) && record.pedestrian_count > 0) {
+        return record.pedestrian_count;
+    }
+    if (Array.isArray(record.results) && record.results.length > 0) {
+        return record.results.length;
+    }
+    if (Array.isArray(record.semantic_results) && record.semantic_results.length > 0) {
+        return record.semantic_results.length;
+    }
+    if (Array.isArray(record.window_summaries) && record.window_summaries.length > 0) {
+        return record.window_summaries.length;
+    }
+    return '--';
+}
+
 function TaskDetail() {
     const navigate = useNavigate();
     const { fileId } = useParams();
@@ -134,165 +143,157 @@ function TaskDetail() {
     }, [fileId]);
 
     const latestTask = tasks[0] || null;
-    const summaryItems = useMemo(
-        () => [
-            { label: '文件', value: getFileTypeLabel(file?.file_type) },
-            { label: '状态', value: getStatusLabel(latestTask?.status || file?.status) },
-            { label: '工作流', value: getPipelineLabel(latestTask?.pipeline || record?.pipeline) },
-            { label: '结果', value: record?.pedestrian_count ?? record?.semantic_results?.length ?? '--' },
-        ],
-        [file, latestTask, record],
+
+    const summaryItems = [
+        { label: '文件', value: getFileTypeLabel(file?.file_type) },
+        { label: '状态', value: getStatusLabel(latestTask?.status || file?.status) },
+        { label: '工作流', value: getPipelineLabel(latestTask?.pipeline || record?.pipeline) },
+        { label: '结果数', value: getRecordResultCount(record) },
+    ];
+
+    const structuredResults = useMemo(() => (record?.results || []).slice(0, 6), [record]);
+    const semanticWindows = useMemo(() => (record?.window_summaries || []).slice(0, 5), [record]);
+    const eventChain = useMemo(
+        () => (record?.video_insights?.event_chain || []).slice(0, 4),
+        [record],
+    );
+    const followups = useMemo(
+        () => (record?.video_insights?.agent_followups || record?.video_insights?.operator_recommendations || []).slice(0, 4),
+        [record],
     );
 
-    const structuredResults = (record?.results || []).slice(0, 6);
-    const semanticWindows = (record?.window_summaries || []).slice(0, 5);
-    const eventChain = (record?.video_insights?.event_chain || []).slice(0, 4);
-    const followups = (record?.video_insights?.agent_followups || record?.video_insights?.operator_recommendations || []).slice(0, 4);
-    const conclusion =
-        record?.video_insights?.incident_summary ||
-        (record ? '当前结果以结构化识别为主。' : '结果还没出来。');
+    const summaryText =
+        record?.video_insights?.incident_summary || (record ? '当前结果以结构化识别为主。' : '结果还没有生成。');
 
     return (
         <div className="page-shell">
-            <section className="page-toolbar">
-                <div className="page-header-actions">
-                    <button type="button" className="btn-secondary" onClick={() => navigate('/files')}>
-                        返回
+            <div className="action-row">
+                <button type="button" className="btn-ghost" onClick={() => navigate('/files')}>
+                    返回任务中心
+                </button>
+                {record?.record_id ? (
+                    <button type="button" className="btn-ghost" onClick={() => navigate(`/history`, { state: { recordId: record.record_id } })}>
+                        查看报告
                     </button>
-                    {file?.status === 'analyzed' ? (
-                        <button
-                            type="button"
-                            className="btn-primary"
-                            onClick={() => navigate('/retrieval', { state: { fileId: file.id } })}
-                        >
-                            检索
-                        </button>
-                    ) : null}
-                </div>
-            </section>
+                ) : null}
+            </div>
 
             {error ? <div className="notice error">{error}</div> : null}
             {loading ? <div className="empty-state">正在加载...</div> : null}
 
             {!loading && file ? (
                 <>
-                    <section className="card">
-                        <div className="list-row-title">{file.filename}</div>
-                        <div className="list-row-subtitle">{formatDateTime(file.upload_time)}</div>
-
-                        <div className="action-row" style={{ marginTop: 10 }}>
-                            <span className="page-chip">{summaryItems[1].value}</span>
-                            <span className="page-chip">{summaryItems[2].value}</span>
-                            {record?.video_insights?.risk_level ? <span className="page-chip">风险 {record.video_insights.risk_level}</span> : null}
-                            {record?.duration ? <span className="page-chip">时长 {formatTime(record.duration)}</span> : null}
-                        </div>
-
-                        <div className="compact-summary" style={{ marginTop: 12 }}>
-                            {summaryItems.map((item) => (
-                                <div key={item.label} className="compact-metric">
-                                    <span>{item.label}</span>
-                                    <strong>{item.value}</strong>
+                    <section className="card subtle-card">
+                        <div className="card-title-row">
+                            <div>
+                                <div className="list-row-title">{file.filename}</div>
+                                <div className="list-row-subtitle">
+                                    上传于 {formatDateTime(file.upload_time)}
                                 </div>
-                            ))}
+                            </div>
+                            <div className="compact-summary">
+                                {summaryItems.map((item) => (
+                                    <div key={item.label} className="compact-metric">
+                                        <span>{item.label}</span>
+                                        <strong>{item.value}</strong>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
-
-                        <div className="brief-panel">
-                            <p className="prose-block">{conclusion}</p>
+                        <div className="brief-panel" style={{ marginTop: 16 }}>
+                            <p>{summaryText}</p>
+                            {record?.video_insights?.risk_level ? <span className="page-chip">风险 {record.video_insights.risk_level}</span> : null}
                         </div>
                     </section>
 
                     <div className="page-grid-2">
                         <section className="card">
-                            <div className="list-row-title">任务</div>
-                            <div className="list compact-list" style={{ marginTop: 10 }}>
+                            <div className="list-row-title">任务进度</div>
+                            <div className="list compact-list" style={{ marginTop: 12 }}>
                                 {tasks.map((task) => (
                                     <div key={task.task_id} className="list-row">
                                         <div className="list-row-main">
                                             <div className="list-row-title">{getPipelineLabel(task.pipeline)}</div>
                                             <div className="list-row-subtitle">
-                                                {getStatusLabel(task.status)} · {formatDateTime(task.started_at || task.created_at)}
+                                                {getStatusLabel(task.status)} · 创建于 {formatDateTime(task.created_at)}
                                             </div>
                                         </div>
                                         <div className="list-row-meta">
                                             <span>{Number.isFinite(task.progress_percent) ? `${task.progress_percent}%` : '--'}</span>
+                                            <span>{task.eta_seconds ? formatTime(task.eta_seconds) : '--'}</span>
                                         </div>
                                     </div>
                                 ))}
-                                {!tasks.length ? <div className="empty-state">暂无任务。</div> : null}
+                                {!tasks.length ? <div className="empty-state">还没有分析任务。</div> : null}
                             </div>
                         </section>
 
                         <section className="card">
-                            <div className="list-row-title">结构化</div>
-                            <div className="list compact-list" style={{ marginTop: 10 }}>
-                                {structuredResults.map((item, index) => {
-                                    const attributes = item?.attributes || {};
-                                    const tags = getAccessoryTags(attributes);
-                                    return (
-                                        <div key={`${index}-${item.timestamp || index}`} className="list-row">
-                                            <div className="list-row-main">
-                                                <div className="list-row-title">
-                                                    {translate(attributes.gender, genderLabels)} ·{' '}
-                                                    {translate(attributes.age_group, ageGroupLabels)} ·{' '}
-                                                    {translate(attributes.upper_color, colorLabels)}
-                                                </div>
-                                                <div className="list-row-subtitle">
-                                                    {file.camera_location || record?.camera_location || '--'} · {formatTime(Number(item.timestamp) || 0)}
-                                                </div>
-                                                {tags.length ? (
-                                                    <div className="chip-row">
-                                                        {tags.map((tag) => (
-                                                            <span key={tag} className="filter-chip active">
-                                                                {tag}
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                ) : null}
-                                            </div>
+                            <div className="list-row-title">后续建议</div>
+                            <div className="list compact-list" style={{ marginTop: 12 }}>
+                                {followups.map((item, index) => (
+                                    <div key={`${item}-${index}`} className="list-row">
+                                        <div className="list-row-main">
+                                            <div className="list-row-subtitle">{item}</div>
                                         </div>
-                                    );
-                                })}
-                                {!structuredResults.length ? <div className="empty-state">暂无结果。</div> : null}
+                                    </div>
+                                ))}
+                                {!followups.length ? <div className="empty-state">暂无后续建议。</div> : null}
                             </div>
                         </section>
                     </div>
 
-                    <section className="card">
-                        <div className="list-row-title">语义</div>
-                        <div className="list compact-list" style={{ marginTop: 10 }}>
-                            {semanticWindows.map((window) => (
-                                <div key={`${window.window_start}-${window.window_end}`} className="list-row">
-                                    <div className="list-row-main">
-                                        <div className="list-row-title">
-                                            {formatTime(window.window_start)} - {formatTime(window.window_end)}
+                    <div className="page-grid-2">
+                        <section className="card">
+                            <div className="list-row-title">结构化结果</div>
+                            <div className="list compact-list" style={{ marginTop: 12 }}>
+                                {structuredResults.map((item, index) => {
+                                    const tags = getAccessoryTags(item.attributes);
+                                    return (
+                                        <div key={item.id || index} className="list-row">
+                                            <div className="list-row-main">
+                                                <div className="list-row-title">
+                                                    {translate(item.attributes?.gender, genderLabels)} · {translate(item.attributes?.age_group, ageGroupLabels)}
+                                                </div>
+                                                <div className="list-row-subtitle">
+                                                    上衣 {translate(item.attributes?.upper_color, colorLabels)} · 下衣{' '}
+                                                    {translate(item.attributes?.lower_color, colorLabels)}
+                                                    {tags.length ? ` · ${tags.join(' / ')}` : ''}
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div className="list-row-subtitle">{window.window_summary}</div>
-                                    </div>
-                                    <div className="list-row-meta">
-                                        <span>峰值 {window?.crowd_change?.peak_people_count ?? '--'}</span>
-                                    </div>
-                                </div>
-                            ))}
-                            {!semanticWindows.length ? <div className="empty-state">暂无结果。</div> : null}
-                        </div>
-
-                        {eventChain.length || followups.length ? (
-                            <div className="page-grid-2 inner-grid">
-                                <div className="card subtle-card">
-                                    <h3>事件</h3>
-                                    <ul className="simple-list">
-                                        {eventChain.length ? eventChain.map((item, index) => <li key={`${item}-${index}`}>{item}</li>) : <li>暂无。</li>}
-                                    </ul>
-                                </div>
-                                <div className="card subtle-card">
-                                    <h3>后续</h3>
-                                    <ul className="simple-list">
-                                        {followups.length ? followups.map((item, index) => <li key={`${item}-${index}`}>{item}</li>) : <li>暂无。</li>}
-                                    </ul>
-                                </div>
+                                    );
+                                })}
+                                {!structuredResults.length ? <div className="empty-state">暂无结构化结果。</div> : null}
                             </div>
-                        ) : null}
-                    </section>
+                        </section>
+
+                        <section className="card">
+                            <div className="list-row-title">语义研判</div>
+                            <div className="list compact-list" style={{ marginTop: 12 }}>
+                                {semanticWindows.map((window, index) => (
+                                    <div key={window.window_id || index} className="list-row">
+                                        <div className="list-row-main">
+                                            <div className="list-row-title">
+                                                时间窗 {index + 1} · 峰值 {window?.crowd_change?.peak_people_count ?? '--'}
+                                            </div>
+                                            <div className="list-row-subtitle">{window.window_summary || '暂无摘要。'}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                                {!semanticWindows.length && eventChain.length ? (
+                                    eventChain.map((item, index) => (
+                                        <div key={`${item}-${index}`} className="list-row">
+                                            <div className="list-row-main">
+                                                <div className="list-row-subtitle">{item}</div>
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : null}
+                                {!semanticWindows.length && !eventChain.length ? <div className="empty-state">暂无语义研判结果。</div> : null}
+                            </div>
+                        </section>
+                    </div>
                 </>
             ) : null}
         </div>

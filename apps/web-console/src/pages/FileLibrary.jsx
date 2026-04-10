@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { formatDateTime } from '../lib/time';
 
 const ACTIVE_TASK_STATUSES = new Set(['queued', 'running']);
 
@@ -69,7 +70,6 @@ function FileLibrary() {
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
     const [actionFileId, setActionFileId] = useState(null);
-    const [showUploadModal, setShowUploadModal] = useState(false);
     const [uploadDraft, setUploadDraft] = useState(emptyUploadState);
     const [libraryError, setLibraryError] = useState('');
     const [libraryNotice, setLibraryNotice] = useState('');
@@ -81,13 +81,13 @@ function FileLibrary() {
         try {
             const [filesResponse, tasksResponse] = await Promise.all([
                 api.get('/files'),
-                api.get('/analyze/tasks', { params: { limit: 12 } }),
+                api.get('/analyze/tasks', { params: { limit: 20 } }),
             ]);
             setFiles(filesResponse.data || []);
             setAnalysisTasks(tasksResponse.data || []);
             setLibraryError('');
         } catch (error) {
-            console.error('Failed to load library data', error);
+            console.error('Failed to load file library', error);
             setLibraryError('任务中心加载失败。');
         } finally {
             if (!silent) setLoading(false);
@@ -105,87 +105,82 @@ function FileLibrary() {
         return () => window.clearInterval(timer);
     }, [hasActiveTasks]);
 
-    const filesWithTasks = useMemo(
-        () =>
-            files.map((file) => {
-                const activeTask = analysisTasks.find(
-                    (task) => task.file_id === file.id && ACTIVE_TASK_STATUSES.has(task.status),
-                );
-                return { ...file, activeTask };
-            }),
-        [analysisTasks, files],
-    );
+    const taskMap = useMemo(() => {
+        const map = new Map();
+        for (const task of analysisTasks) {
+            if (!map.has(task.file_id)) {
+                map.set(task.file_id, task);
+            }
+        }
+        return map;
+    }, [analysisTasks]);
 
-    const stats = useMemo(() => {
-        const uploaded = files.length;
-        const analyzed = files.filter((file) => file.status === 'analyzed').length;
-        const running = analysisTasks.filter((task) => ACTIVE_TASK_STATUSES.has(task.status)).length;
-        return { uploaded, analyzed, running };
-    }, [analysisTasks, files]);
+    const recentTasks = analysisTasks.slice(0, 6);
 
-    const resetUploadDraft = () => {
-        setUploadDraft(emptyUploadState);
-        setShowUploadModal(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
+    const handleChooseFile = () => {
+        fileInputRef.current?.click();
     };
 
-    const handleFileSelect = (event) => {
+    const handleFilePicked = (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
+        const isVideo = file.type?.startsWith('video/');
         setUploadDraft({
             file,
-            startTime: toLocalInputValue(new Date()),
+            startTime: isVideo ? toLocalInputValue(new Date()) : '',
             autoAnalyze: true,
-            pipeline: file.type?.startsWith('video/') ? 'dual' : 'classic_cv',
+            pipeline: isVideo ? 'dual' : 'classic_cv',
         });
-        setShowUploadModal(true);
+        setLibraryNotice('');
+        setLibraryError('');
     };
 
     const handleUpload = async () => {
-        if (!uploadDraft.file) return;
+        if (!uploadDraft.file || uploading) return;
         setUploading(true);
         setLibraryError('');
         setLibraryNotice('');
-        setShowUploadModal(false);
-
-        const formData = new FormData();
-        formData.append('file', uploadDraft.file);
-        if (uploadDraft.startTime) formData.append('start_time', uploadDraft.startTime);
-
         try {
-            const uploadResponse = await api.post('/files/upload', formData);
+            const formData = new FormData();
+            formData.append('file', uploadDraft.file);
+            if (uploadDraft.startTime) {
+                formData.append('start_time', uploadDraft.startTime);
+            }
+            const uploadResponse = await api.post('/files/upload', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
             const createdFile = uploadResponse.data;
+
             if (uploadDraft.autoAnalyze && createdFile?.id) {
                 await api.post(`/analyze/${createdFile.id}`, null, {
-                    params: { pipeline: uploadDraft.pipeline },
+                    params: { immediate: 1, pipeline: uploadDraft.pipeline },
                 });
-                setLibraryNotice(`${createdFile.filename} 已加入${getPipelineLabel(uploadDraft.pipeline)}。`);
-            } else {
-                setLibraryNotice(`${createdFile?.filename || '文件'}上传成功。`);
             }
-            await loadLibrary({ silent: true });
+
+            setUploadDraft(emptyUploadState);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            setLibraryNotice(`${createdFile?.filename || '文件'}上传成功。`);
+            await loadLibrary();
         } catch (error) {
-            console.error('Upload failed', error);
+            console.error('Failed to upload file', error);
             setLibraryError(error?.response?.data?.detail || '上传失败。');
         } finally {
             setUploading(false);
-            resetUploadDraft();
         }
     };
 
     const handleAnalyze = async (file) => {
-        const selectedPipeline = file.file_type === 'video' ? 'dual' : 'classic_cv';
+        if (!file || actionFileId === file.id) return;
         setActionFileId(file.id);
         setLibraryError('');
-        setLibraryNotice('');
         try {
+            const selectedPipeline = file.file_type === 'video' ? 'dual' : 'classic_cv';
             await api.post(`/analyze/${file.id}`, null, {
-                params: { pipeline: selectedPipeline },
+                params: { immediate: 1, pipeline: selectedPipeline },
             });
-            setLibraryNotice(`${file.filename} 已加入${getPipelineLabel(selectedPipeline)}。`);
-            await loadLibrary({ silent: true });
+            await loadLibrary();
         } catch (error) {
-            console.error('Analysis queue failed', error);
+            console.error('Failed to start analysis', error);
             setLibraryError(error?.response?.data?.detail || '发起分析失败。');
         } finally {
             setActionFileId(null);
@@ -194,161 +189,154 @@ function FileLibrary() {
 
     return (
         <div className="page-shell">
-            <section className="page-toolbar">
-                <div className="page-header-actions">
-                    <button type="button" className="btn-primary" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-                        {uploading ? '上传中…' : '上传文件'}
-                    </button>
-                </div>
-            </section>
-
             <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*,video/mp4,video/avi,video/x-msvideo"
+                accept="image/*,video/*"
                 style={{ display: 'none' }}
-                onChange={handleFileSelect}
+                onChange={handleFilePicked}
             />
 
-            {libraryError ? <div className="notice error">{libraryError}</div> : null}
-            {libraryNotice ? <div className="notice success">{libraryNotice}</div> : null}
-
-            <section className="card subtle-card compact-card">
-                <div className="compact-summary">
-                    <div className="compact-metric">
-                        <span>文件</span>
-                        <strong>{stats.uploaded}</strong>
+            <section className="card subtle-card">
+                <div className="card-title-row">
+                    <div>
+                        <div className="list-row-title">上传任务</div>
+                        <div className="list-row-subtitle">上传图片或视频，并决定是否立即开始分析。</div>
                     </div>
-                    <div className="compact-metric">
-                        <span>分析中</span>
-                        <strong>{stats.running}</strong>
-                    </div>
-                    <div className="compact-metric">
-                        <span>已完成</span>
-                        <strong>{stats.analyzed}</strong>
-                    </div>
+                    <button type="button" className="btn-primary" onClick={handleChooseFile} disabled={uploading}>
+                        选择文件
+                    </button>
                 </div>
+
+                {uploadDraft.file ? (
+                    <div className="form-grid compact-form-grid" style={{ marginTop: 16 }}>
+                        <div className="form-field">
+                            <label>文件</label>
+                            <div className="input-like">{uploadDraft.file.name}</div>
+                        </div>
+                        <div className="form-field">
+                            <label>工作流</label>
+                            <select
+                                value={uploadDraft.pipeline}
+                                onChange={(event) =>
+                                    setUploadDraft((current) => ({ ...current, pipeline: event.target.value }))
+                                }
+                            >
+                                <option value="classic_cv">结构化识别</option>
+                                <option value="semantic_vlm">语义研判</option>
+                                <option value="dual">双工作流</option>
+                            </select>
+                        </div>
+                        {uploadDraft.file.type?.startsWith('video/') ? (
+                            <div className="form-field">
+                                <label>视频开始时间</label>
+                                <input
+                                    type="datetime-local"
+                                    value={uploadDraft.startTime}
+                                    onChange={(event) =>
+                                        setUploadDraft((current) => ({ ...current, startTime: event.target.value }))
+                                    }
+                                />
+                            </div>
+                        ) : null}
+                        <label className="checkbox-row">
+                            <input
+                                type="checkbox"
+                                checked={uploadDraft.autoAnalyze}
+                                onChange={(event) =>
+                                    setUploadDraft((current) => ({ ...current, autoAnalyze: event.target.checked }))
+                                }
+                            />
+                            <span>上传后立即分析</span>
+                        </label>
+                        <div className="action-row">
+                            <button type="button" className="btn-primary" onClick={handleUpload} disabled={uploading}>
+                                {uploading ? '上传中…' : '开始上传'}
+                            </button>
+                            <button type="button" className="btn-ghost" onClick={() => setUploadDraft(emptyUploadState)}>
+                                取消
+                            </button>
+                        </div>
+                    </div>
+                ) : null}
+
+                {libraryError ? <div className="notice error">{libraryError}</div> : null}
+                {libraryNotice ? <div className="notice success">{libraryNotice}</div> : null}
             </section>
 
             <div className="page-grid-2">
                 <section className="card">
                     <div className="list-row-title">最近任务</div>
-                    <div className="list compact-list" style={{ marginTop: 10 }}>
-                        {analysisTasks.map((task) => (
+                    <div className="list compact-list" style={{ marginTop: 12 }}>
+                        {recentTasks.map((task) => (
                             <div key={task.task_id} className="list-row">
                                 <div className="list-row-main">
-                                    <div className="list-row-title">{task.filename || `文件 #${task.file_id}`}</div>
+                                    <div className="list-row-title">{task.filename || `任务 #${task.task_id}`}</div>
                                     <div className="list-row-subtitle">
                                         {getPipelineLabel(task.pipeline)} · {getTaskLabel(task.status)}
                                     </div>
                                 </div>
                                 <div className="list-row-meta">
                                     <span>{Number.isFinite(task.progress_percent) ? `${task.progress_percent}%` : '--'}</span>
-                                    <button type="button" className="btn-ghost" onClick={() => navigate(`/tasks/${task.file_id}`)}>
-                                        详情
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={() => navigate(`/tasks/${task.file_id}`)}
+                                    >
+                                        查看
                                     </button>
                                 </div>
                             </div>
                         ))}
-                        {!analysisTasks.length ? <div className="empty-state">暂无任务。</div> : null}
+                        {!recentTasks.length ? <div className="empty-state">暂无任务。</div> : null}
                     </div>
                 </section>
 
                 <section className="card">
-                    <div className="list-row-title">文件</div>
+                    <div className="list-row-title">文件列表</div>
                     {loading ? <div className="empty-state">正在加载…</div> : null}
                     {!loading ? (
-                        <div className="list compact-list" style={{ marginTop: 10 }}>
-                            {filesWithTasks.map((file) => {
-                                const isBusy = actionFileId === file.id;
-                                const status = getFileStatus(file, file.activeTask);
-                                const taskActionDisabled = Boolean(file.activeTask) || isBusy;
+                        <div className="list compact-list" style={{ marginTop: 12 }}>
+                            {files.map((file) => {
+                                const task = taskMap.get(file.id);
+                                const isBusy = ACTIVE_TASK_STATUSES.has(task?.status);
                                 return (
                                     <div key={file.id} className="list-row">
                                         <div className="list-row-main">
                                             <div className="list-row-title">{file.filename}</div>
                                             <div className="list-row-subtitle">
-                                                {getFileTypeLabel(file.file_type)} · {formatBytes(file.file_size)} · {status}
+                                                {getFileTypeLabel(file.file_type)} · {formatBytes(file.file_size)} ·{' '}
+                                                {formatDateTime(file.upload_time)}
                                             </div>
                                         </div>
                                         <div className="list-row-meta">
-                                            {file.status === 'analyzed' ? (
-                                                <button type="button" className="btn-ghost" onClick={() => navigate(`/tasks/${file.id}`)}>
-                                                    详情
-                                                </button>
-                                            ) : (
+                                            <span>{getFileStatus(file, task)}</span>
+                                            <button
+                                                type="button"
+                                                className="btn-ghost"
+                                                onClick={() => navigate(`/tasks/${file.id}`)}
+                                            >
+                                                详情
+                                            </button>
+                                            {file.status === 'analyzed' ? null : (
                                                 <button
                                                     type="button"
                                                     className="btn-ghost"
                                                     onClick={() => handleAnalyze(file)}
-                                                    disabled={taskActionDisabled}
+                                                    disabled={isBusy || actionFileId === file.id}
                                                 >
-                                                    {file.activeTask ? '处理中' : '开始'}
+                                                    {actionFileId === file.id ? '处理中…' : '分析'}
                                                 </button>
                                             )}
                                         </div>
                                     </div>
                                 );
                             })}
-                            {!filesWithTasks.length ? <div className="empty-state">暂无文件。</div> : null}
+                            {!files.length ? <div className="empty-state">还没有上传文件。</div> : null}
                         </div>
                     ) : null}
                 </section>
             </div>
-
-            {showUploadModal ? (
-                <div className="modal-backdrop">
-                    <div className="modal">
-                        <div className="list-row-title">上传文件</div>
-                        {uploadDraft.file?.name ? <div className="list-row-subtitle">{uploadDraft.file.name}</div> : null}
-
-                        <div className="field-grid one" style={{ marginTop: 14 }}>
-                            <label className="field">
-                                <span>开始时间</span>
-                                <input
-                                    type="datetime-local"
-                                    value={uploadDraft.startTime}
-                                    onChange={(event) => setUploadDraft((current) => ({ ...current, startTime: event.target.value }))}
-                                />
-                            </label>
-
-                            <label className="field">
-                                <span>分析方式</span>
-                                <select
-                                    value={uploadDraft.pipeline}
-                                    onChange={(event) => setUploadDraft((current) => ({ ...current, pipeline: event.target.value }))}
-                                >
-                                    <option value="classic_cv">结构化识别</option>
-                                    <option value="semantic_vlm" disabled={uploadDraft.file?.type && !uploadDraft.file.type.startsWith('video/')}>
-                                        语义研判（视频）
-                                    </option>
-                                    <option value="dual" disabled={uploadDraft.file?.type && !uploadDraft.file.type.startsWith('video/')}>
-                                        双工作流（视频）
-                                    </option>
-                                </select>
-                            </label>
-
-                            <label className="checkbox-field">
-                                <input
-                                    type="checkbox"
-                                    checked={uploadDraft.autoAnalyze}
-                                    onChange={(event) => setUploadDraft((current) => ({ ...current, autoAnalyze: event.target.checked }))}
-                                />
-                                <span>上传后立即分析</span>
-                            </label>
-                        </div>
-
-                        <div className="modal-actions">
-                            <button type="button" className="btn-secondary" onClick={resetUploadDraft}>
-                                取消
-                            </button>
-                            <button type="button" className="btn-primary" onClick={handleUpload}>
-                                上传
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            ) : null}
         </div>
     );
 }

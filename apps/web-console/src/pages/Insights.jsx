@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
+import { formatDateInputValue } from '../lib/time';
 
 function formatDateLabel(value) {
     if (!value) return '--';
@@ -11,7 +12,7 @@ function formatDateLabel(value) {
 }
 
 function Insights() {
-    const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+    const today = useMemo(() => formatDateInputValue(new Date()), []);
     const [selectedDate, setSelectedDate] = useState(today);
     const [files, setFiles] = useState([]);
     const [selectedFile, setSelectedFile] = useState('');
@@ -161,25 +162,17 @@ function Insights() {
                     </section>
 
                     <section className="card">
-                        <div className="card-header">
-                            <div>
-                                <h2 className="card-title">一句结论</h2>
-                                <p className="card-subtitle">{selectedFile ? '当前文件' : formatDateLabel(data.scope?.date)}</p>
-                            </div>
-                        </div>
-                        <div className="brief-panel">
+                        <div className="list-row-title">一句结论</div>
+                        <div className="brief-panel" style={{ marginTop: 12 }}>
                             <p className="prose-block">{data.summary || '当前没有可展示的摘要。'}</p>
+                            <div className="list-row-subtitle">{selectedFile ? '当前文件' : formatDateLabel(data.scope?.date)}</div>
                         </div>
                     </section>
 
                     <div className="page-grid-2">
                         <section className="card">
-                            <div className="card-header">
-                                <div>
-                                    <h2 className="card-title">重点</h2>
-                                </div>
-                            </div>
-                            <ul className="simple-list">
+                            <div className="list-row-title">重点</div>
+                            <ul className="simple-list" style={{ marginTop: 12 }}>
                                 {focusItems.map((item, index) => (
                                     <li key={`${item}-${index}`}>{item}</li>
                                 ))}
@@ -187,12 +180,8 @@ function Insights() {
                         </section>
 
                         <section className="card">
-                            <div className="card-header">
-                                <div>
-                                    <h2 className="card-title">建议动作</h2>
-                                </div>
-                            </div>
-                            <ul className="simple-list">
+                            <div className="list-row-title">建议动作</div>
+                            <ul className="simple-list" style={{ marginTop: 12 }}>
                                 {actionItems.map((item, index) => (
                                     <li key={`${item}-${index}`}>{item}</li>
                                 ))}
@@ -201,13 +190,8 @@ function Insights() {
                     </div>
 
                     <section className="card">
-                        <div className="card-header">
-                            <div>
-                                <h2 className="card-title">继续追问</h2>
-                            </div>
-                        </div>
-
-                        <div className="field-grid one">
+                        <div className="list-row-title">继续追问</div>
+                        <div className="field-grid one" style={{ marginTop: 12 }}>
                             <label className="field">
                                 <span>问题</span>
                                 <textarea

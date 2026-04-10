@@ -137,11 +137,7 @@ function TrafficAnalysis() {
                     </section>
 
                     <section className="card">
-                        <div className="card-header">
-                            <div>
-                                <h2 className="card-title">人数趋势</h2>
-                            </div>
-                        </div>
+                        <div className="list-row-title">人数趋势</div>
                         <div className="chart-box">
                             <ResponsiveContainer width="100%" height={320}>
                                 <AreaChart data={stats.traffic_trend || []}>
@@ -157,12 +153,8 @@ function TrafficAnalysis() {
 
                     <div className="page-grid-2">
                         <section className="card">
-                            <div className="card-header">
-                                <div>
-                                    <h2 className="card-title">性别分布</h2>
-                                </div>
-                            </div>
-                            <div className="meter-list">
+                            <div className="list-row-title">性别分布</div>
+                            <div className="meter-list" style={{ marginTop: 12 }}>
                                 {Object.entries(stats.gender_distribution || {}).length ? (
                                     Object.entries(stats.gender_distribution || {}).map(([key, value]) => (
                                         <div key={key} className="meter-row">
@@ -182,12 +174,8 @@ function TrafficAnalysis() {
                         </section>
 
                         <section className="card">
-                            <div className="card-header">
-                                <div>
-                                    <h2 className="card-title">年龄分布</h2>
-                                </div>
-                            </div>
-                            <div className="meter-list">
+                            <div className="list-row-title">年龄分布</div>
+                            <div className="meter-list" style={{ marginTop: 12 }}>
                                 {Object.entries(stats.age_distribution || {}).length ? (
                                     Object.entries(stats.age_distribution || {}).map(([key, value]) => (
                                         <div key={key} className="meter-row">

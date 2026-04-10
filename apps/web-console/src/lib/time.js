@@ -25,3 +25,17 @@ export function formatDateTime(value, options = {}) {
 export function toTimestamp(value) {
     return parseServerDate(value)?.getTime() ?? 0;
 }
+
+export function formatDateInputValue(value = new Date(), timeZone = 'Asia/Shanghai') {
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).formatToParts(parsed);
+    const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${map.year}-${map.month}-${map.day}`;
+}

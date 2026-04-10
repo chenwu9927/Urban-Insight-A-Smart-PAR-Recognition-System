@@ -40,13 +40,14 @@ function Settings({ user, onLogout }) {
         }
         try {
             const response = await api.get('/settings/llm');
-            setLlmApiKeySet(response.data.api_key_set);
+            setLlmApiKeySet(Boolean(response.data.api_key_set));
             setLlmApiKeyPreview(response.data.api_key_preview || '');
             setLlmConfig((current) => ({
                 ...current,
                 baseUrl: response.data.base_url || 'https://api.longcat.chat/openai',
                 model: response.data.model || 'LongCat-Flash-Lite',
             }));
+            setLlmSaveMessage(null);
         } catch (error) {
             console.error('Failed to load LLM config', error);
             setLlmSaveMessage({
@@ -172,12 +173,8 @@ function Settings({ user, onLogout }) {
 
             <div className="page-grid-2">
                 <section className="card">
-                    <div className="card-header">
-                        <div>
-                            <h2 className="card-title">当前账号</h2>
-                        </div>
-                    </div>
-                    <div className="list compact-list">
+                    <div className="list-row-title">当前账号</div>
+                    <div className="list compact-list" style={{ marginTop: 12 }}>
                         <div className="list-row">
                             <div className="list-row-main">
                                 <div className="list-row-title">{user?.username}</div>
@@ -191,13 +188,9 @@ function Settings({ user, onLogout }) {
                 </section>
 
                 <section className="card">
-                    <div className="card-header">
-                        <div>
-                            <h2 className="card-title">模型状态</h2>
-                        </div>
-                    </div>
+                    <div className="list-row-title">模型状态</div>
                     {isAdmin ? (
-                        <div className="list compact-list">
+                        <div className="list compact-list" style={{ marginTop: 12 }}>
                             <div className="list-row">
                                 <div className="list-row-main">
                                     <div className="list-row-title">Base URL</div>
@@ -217,113 +210,93 @@ function Settings({ user, onLogout }) {
                             </div>
                         </div>
                     ) : (
-                        <div className="empty-state">仅管理员可查看模型配置。</div>
+                        <div className="empty-state">仅管理员可以查看模型配置。</div>
                     )}
                 </section>
             </div>
 
             {isAdmin ? (
-                <section className="card">
-                    <div className="card-header">
-                        <div>
-                            <h2 className="card-title">模型配置</h2>
-                        </div>
-                    </div>
-
-                    {!llmConfigLoaded ? <div className="empty-state">正在加载…</div> : null}
-
-                    {llmConfigLoaded ? (
-                        <>
-                            <div className="field-grid three">
-                                <label className="field">
-                                    <span>API Key</span>
-                                    <input
-                                        type="password"
-                                        value={llmConfig.apiKey}
-                                        onChange={(event) =>
-                                            setLlmConfig((current) => ({ ...current, apiKey: event.target.value }))
-                                        }
-                                        placeholder={llmApiKeySet ? `当前：${llmApiKeyPreview}` : '请输入新的 API Key'}
-                                    />
-                                </label>
-                                <label className="field">
-                                    <span>Base URL</span>
-                                    <input
-                                        type="text"
-                                        value={llmConfig.baseUrl}
-                                        onChange={(event) =>
-                                            setLlmConfig((current) => ({ ...current, baseUrl: event.target.value }))
-                                        }
-                                    />
-                                </label>
-                                <label className="field">
-                                    <span>模型名称</span>
-                                    <input
-                                        type="text"
-                                        value={llmConfig.model}
-                                        onChange={(event) =>
-                                            setLlmConfig((current) => ({ ...current, model: event.target.value }))
-                                        }
-                                    />
-                                </label>
-                            </div>
-
-                            <div className="action-row">
-                                <button type="button" className="btn-primary" onClick={handleSaveLLMConfig} disabled={llmSaving}>
-                                    {llmSaving ? '保存中…' : '保存配置'}
-                                </button>
-                                <button
-                                    type="button"
-                                    className="btn-secondary"
-                                    onClick={handleTestLLMConnection}
-                                    disabled={llmTesting || !llmApiKeySet}
-                                >
-                                    {llmTesting ? '测试中…' : '测试连接'}
-                                </button>
-                                {llmApiKeySet ? (
-                                    <button type="button" className="btn-ghost danger" onClick={handleClearLLMKey} disabled={llmSaving}>
-                                        清空 API Key
-                                    </button>
-                                ) : null}
-                            </div>
-
-                            {llmSaveMessage ? <div className={`notice ${llmSaveMessage.type}`}>{llmSaveMessage.text}</div> : null}
-                            {llmTestResult ? (
-                                <div className={`notice ${llmTestResult.success ? 'success' : 'error'}`}>
-                                    {llmTestResult.message}
+                <>
+                    <section className="card">
+                        <div className="list-row-title">模型配置</div>
+                        {!llmConfigLoaded ? <div className="empty-state">正在加载…</div> : null}
+                        {llmConfigLoaded ? (
+                            <>
+                                <div className="field-grid three" style={{ marginTop: 12 }}>
+                                    <label className="field">
+                                        <span>API Key</span>
+                                        <input
+                                            type="password"
+                                            value={llmConfig.apiKey}
+                                            onChange={(event) =>
+                                                setLlmConfig((current) => ({ ...current, apiKey: event.target.value }))
+                                            }
+                                            placeholder={llmApiKeySet ? `当前：${llmApiKeyPreview}` : '请输入新的 API Key'}
+                                        />
+                                    </label>
+                                    <label className="field">
+                                        <span>Base URL</span>
+                                        <input
+                                            type="text"
+                                            value={llmConfig.baseUrl}
+                                            onChange={(event) =>
+                                                setLlmConfig((current) => ({ ...current, baseUrl: event.target.value }))
+                                            }
+                                        />
+                                    </label>
+                                    <label className="field">
+                                        <span>模型名称</span>
+                                        <input
+                                            type="text"
+                                            value={llmConfig.model}
+                                            onChange={(event) =>
+                                                setLlmConfig((current) => ({ ...current, model: event.target.value }))
+                                            }
+                                        />
+                                    </label>
                                 </div>
-                            ) : null}
-                        </>
-                    ) : null}
-                </section>
-            ) : null}
 
-            {isAdmin ? (
-                <section className="card">
-                    <div className="card-header">
-                        <div>
-                            <h2 className="card-title">用户管理</h2>
+                                <div className="action-row" style={{ marginTop: 16 }}>
+                                    <button type="button" className="btn-primary" onClick={handleSaveLLMConfig} disabled={llmSaving}>
+                                        {llmSaving ? '保存中…' : '保存配置'}
+                                    </button>
+                                    <button type="button" className="btn-ghost" onClick={handleTestLLMConnection} disabled={llmTesting}>
+                                        {llmTesting ? '测试中…' : '测试连接'}
+                                    </button>
+                                    {llmApiKeySet ? (
+                                        <button type="button" className="btn-ghost danger" onClick={handleClearLLMKey} disabled={llmSaving}>
+                                            清空 Key
+                                        </button>
+                                    ) : null}
+                                </div>
+
+                                {llmSaveMessage ? <div className={`notice ${llmSaveMessage.type}`}>{llmSaveMessage.text}</div> : null}
+                                {llmTestResult ? (
+                                    <div className={`notice ${llmTestResult.success ? 'success' : 'error'}`}>
+                                        {llmTestResult.message || (llmTestResult.success ? '连接成功。' : '连接失败。')}
+                                    </div>
+                                ) : null}
+                            </>
+                        ) : null}
+                    </section>
+
+                    <section className="card">
+                        <div className="card-title-row">
+                            <div className="list-row-title">用户管理</div>
+                            <button type="button" className="btn-ghost" onClick={() => setShowAddUser((current) => !current)}>
+                                {showAddUser ? '收起' : '新增用户'}
+                            </button>
                         </div>
-                        <button type="button" className="btn-primary" onClick={() => setShowAddUser((current) => !current)}>
-                            {showAddUser ? '收起表单' : '新增用户'}
-                        </button>
-                    </div>
 
-                    {showAddUser ? (
-                        <form className="card subtle-card" onSubmit={handleAddUser}>
-                            <div className="field-grid three">
+                        {showAddUser ? (
+                            <form className="field-grid three" style={{ marginTop: 12 }} onSubmit={handleAddUser}>
                                 <label className="field">
                                     <span>用户名</span>
                                     <input value={newUsername} onChange={(event) => setNewUsername(event.target.value)} required />
                                 </label>
                                 <label className="field">
                                     <span>密码</span>
-                                    <input
-                                        type="password"
-                                        value={newPassword}
-                                        onChange={(event) => setNewPassword(event.target.value)}
-                                        required
-                                    />
+                                    <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required />
                                 </label>
                                 <label className="field">
                                     <span>角色</span>
@@ -332,41 +305,36 @@ function Settings({ user, onLogout }) {
                                         <option value="admin">管理员</option>
                                     </select>
                                 </label>
-                            </div>
-                            <div className="action-row">
-                                <button type="submit" className="btn-primary">
-                                    创建用户
-                                </button>
-                                <button type="button" className="btn-secondary" onClick={() => setShowAddUser(false)}>
-                                    取消
-                                </button>
-                            </div>
-                        </form>
-                    ) : null}
+                                <div className="action-row">
+                                    <button type="submit" className="btn-primary">
+                                        创建用户
+                                    </button>
+                                </div>
+                            </form>
+                        ) : null}
 
-                    <div className="list compact-list">
-                        {users.map((account) => (
-                            <div key={account.id} className="list-row">
-                                <div className="list-row-main">
-                                    <div className="list-row-title">{account.username}</div>
-                                    <div className="list-row-subtitle">
-                                        角色：{account.role === 'admin' ? '管理员' : '普通用户'}
+                        <div className="list compact-list" style={{ marginTop: 12 }}>
+                            {users.map((item) => (
+                                <div key={item.id} className="list-row">
+                                    <div className="list-row-main">
+                                        <div className="list-row-title">{item.username}</div>
+                                        <div className="list-row-subtitle">角色：{item.role === 'admin' ? '管理员' : '普通用户'}</div>
+                                    </div>
+                                    <div className="list-row-meta">
+                                        {item.username !== user?.username ? (
+                                            <button type="button" className="btn-ghost danger" onClick={() => handleDeleteUser(item.id)}>
+                                                删除
+                                            </button>
+                                        ) : (
+                                            <span className="status-tag is-info">当前账号</span>
+                                        )}
                                     </div>
                                 </div>
-                                <div className="list-row-meta">
-                                    {account.id !== user?.id ? (
-                                        <button type="button" className="btn-ghost danger" onClick={() => handleDeleteUser(account.id)}>
-                                            删除
-                                        </button>
-                                    ) : (
-                                        <span className="status-tag is-info">当前账号</span>
-                                    )}
-                                </div>
-                            </div>
-                        ))}
-                        {!users.length ? <div className="empty-state">暂无用户数据。</div> : null}
-                    </div>
-                </section>
+                            ))}
+                            {!users.length ? <div className="empty-state">暂无用户。</div> : null}
+                        </div>
+                    </section>
+                </>
             ) : null}
         </div>
     );

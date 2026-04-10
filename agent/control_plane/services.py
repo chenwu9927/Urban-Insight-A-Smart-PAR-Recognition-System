@@ -74,6 +74,9 @@ def create_message(
     )
     db.add(message)
     db.flush()
+    session = db.query(AgentSession).filter(AgentSession.id == session_id).first()
+    if session is not None:
+        session.updated_at = utcnow()
     return message
 
 
@@ -109,6 +112,10 @@ def create_run(
     )
     db.add(run)
     db.flush()
+    session = db.query(AgentSession).filter(AgentSession.id == session_id).first()
+    if session is not None:
+        session.last_run_at = run.scheduled_at
+        session.updated_at = utcnow()
     return run
 
 

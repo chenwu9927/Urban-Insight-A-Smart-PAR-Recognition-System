@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from agent.control_plane.schemas import (
@@ -11,8 +12,8 @@ from agent.control_plane.schemas import (
     AgentSessionUpdate,
     AgentUnifiedMessageResponse,
 )
-from agent.control_plane.services import create_message
-from agent.models import AgentMessage, AgentSession
+from agent.control_plane.services import ACTIVE_RUN_STATUSES, create_message, utcnow
+from agent.models import AgentApprovalRequest, AgentMessage, AgentRun, AgentScheduledTask, AgentSession
 from backend.database import get_db
 
 router = APIRouter()
@@ -89,7 +90,14 @@ def list_sessions(
         query = query.filter(AgentSession.site_id == site_id)
     if camera_id:
         query = query.filter(AgentSession.camera_id == camera_id)
-    sessions = query.order_by(AgentSession.created_at.desc()).limit(limit).all()
+    sessions = (
+        query.order_by(
+            func.coalesce(AgentSession.last_run_at, AgentSession.updated_at, AgentSession.created_at).desc(),
+            AgentSession.created_at.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
     return [_serialize_session_summary(session) for session in sessions]
 
 
@@ -210,3 +218,59 @@ def update_session(
     db.commit()
     db.refresh(session)
     return _serialize_session_summary(session, include_details=True)
+
+
+@router.delete("/agent/sessions/{session_id}")
+def delete_session(session_id: str, db: Session = Depends(get_db)):
+    session = (
+        db.query(AgentSession)
+        .filter(AgentSession.id == session_id, AgentSession.is_deleted == False)  # noqa: E712
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Agent session not found")
+
+    now = utcnow()
+    cancelled_runs = (
+        db.query(AgentRun)
+        .filter(
+            AgentRun.session_id == session_id,
+            AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
+        )
+        .all()
+    )
+    for run in cancelled_runs:
+        run.status = "cancelled"
+        run.last_error = "Session deleted by operator"
+        run.finished_at = now
+        run.claimed_by = None
+        run.lease_expires_at = None
+
+    rejected_approvals = (
+        db.query(AgentApprovalRequest)
+        .filter(
+            AgentApprovalRequest.session_id == session_id,
+            AgentApprovalRequest.status == "pending",
+        )
+        .all()
+    )
+    for approval in rejected_approvals:
+        approval.status = "rejected"
+        approval.answers = {"source": "session_cleanup", "reason": "Session deleted by operator"}
+        approval.answered_at = now
+
+    detached_tasks = db.query(AgentScheduledTask).filter(AgentScheduledTask.session_id == session_id).all()
+    for task in detached_tasks:
+        task.session_id = None
+
+    session.is_deleted = True
+    session.status = "archived"
+    session.last_run_at = now
+
+    db.commit()
+    return {
+        "ok": True,
+        "cancelled_runs": len(cancelled_runs),
+        "rejected_approvals": len(rejected_approvals),
+        "detached_tasks": len(detached_tasks),
+    }
