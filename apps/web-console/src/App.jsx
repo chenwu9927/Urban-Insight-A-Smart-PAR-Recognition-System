@@ -1,5 +1,6 @@
-import { Suspense, lazy, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { api } from './lib/api';
 
 const MainLayout = lazy(() => import('./components/Layout/MainLayout'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -32,14 +33,50 @@ function AppFallback() {
 
 function App() {
     const [user, setUser] = useState(loadStoredUser);
+    const [bootstrapping, setBootstrapping] = useState(true);
 
     const handleLogin = (userData) => {
+        localStorage.setItem('user', JSON.stringify(userData));
         setUser(userData);
     };
 
     const handleLogout = () => {
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
         setUser(null);
     };
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const bootstrapSession = async () => {
+            try {
+                const response = await api.get('/auth/me');
+                if (cancelled) return;
+                localStorage.setItem('user', JSON.stringify(response.data));
+                setUser(response.data);
+            } catch {
+                if (cancelled) return;
+                localStorage.removeItem('user');
+                localStorage.removeItem('token');
+                setUser(null);
+            } finally {
+                if (!cancelled) {
+                    setBootstrapping(false);
+                }
+            }
+        };
+
+        void bootstrapSession();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    if (bootstrapping) {
+        return <AppFallback />;
+    }
 
     if (!user) {
         return (

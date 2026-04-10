@@ -155,10 +155,16 @@ function Settings({ user, onLogout }) {
         }
     };
 
-    const handleLogout = () => {
-        localStorage.removeItem('user');
-        localStorage.removeItem('token');
-        onLogout();
+    const handleLogout = async () => {
+        try {
+            await api.post('/auth/logout');
+        } catch (error) {
+            console.error('Failed to logout cleanly', error);
+        } finally {
+            localStorage.removeItem('user');
+            localStorage.removeItem('token');
+            onLogout();
+        }
     };
 
     return (
