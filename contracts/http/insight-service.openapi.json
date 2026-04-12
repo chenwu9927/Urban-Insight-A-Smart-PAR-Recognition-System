@@ -367,8 +367,25 @@
           "settings"
         ],
         "summary": "Get Llm Config",
-        "description": "获取 LLM 配置（API Key 脱敏）",
         "operationId": "get_llm_config_settings_llm_get",
+        "parameters": [
+          {
+            "name": "session_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Token"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -376,6 +393,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LLMConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -387,17 +414,34 @@
           "settings"
         ],
         "summary": "Save Llm Config",
-        "description": "保存 LLM 配置",
         "operationId": "save_llm_config_settings_llm_post",
+        "parameters": [
+          {
+            "name": "session_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Token"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/LLMConfigRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -427,14 +471,41 @@
           "settings"
         ],
         "summary": "Test Llm Connection",
-        "description": "测试 LLM 连接",
         "operationId": "test_llm_connection_settings_llm_test_post",
+        "parameters": [
+          {
+            "name": "session_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Token"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }

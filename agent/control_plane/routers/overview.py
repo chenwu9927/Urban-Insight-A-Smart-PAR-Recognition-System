@@ -12,12 +12,31 @@ from backend.database import get_db
 
 router = APIRouter()
 
+OPERATOR_SESSION_SOURCES = ("web", "email", "manual")
+
+
+def _normalize_text(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if set(text) <= {"?"}:
+        return None
+    return text
+
 
 def _serialize_run(run: AgentRun, session: AgentSession | None, trigger_message: AgentMessage | None) -> dict:
     content = trigger_message.content if trigger_message else None
     text = ""
     if isinstance(content, dict):
         text = str(content.get("text") or "").strip()
+    input_payload = run.input_payload if isinstance(run.input_payload, dict) else {}
+    params = input_payload.get("params") if isinstance(input_payload.get("params"), dict) else {}
+    input_summary = {
+        "action": str(input_payload.get("action") or "").strip() or None,
+        "question": str(params.get("question") or params.get("query") or "").strip()[:240] or None,
+        "record_id": params.get("record_id"),
+        "task_id": params.get("task_id"),
+    }
     return {
         "id": run.id,
         "status": run.status,
@@ -28,11 +47,11 @@ def _serialize_run(run: AgentRun, session: AgentSession | None, trigger_message:
         "schedule_mode": run.schedule_mode,
         "permission_mode": run.permission_mode,
         "session_id": run.session_id,
-        "session_title": session.title if session else None,
+        "session_title": _normalize_text(session.title) if session else None,
         "session_kind": session.kind if session else None,
-        "trigger_text": text or (trigger_message.text_preview if trigger_message else None),
+        "trigger_text": _normalize_text(text or (trigger_message.text_preview if trigger_message else None)),
         "result_summary": run.result_summary,
-        "input_payload": run.input_payload,
+        "input_summary": input_summary,
         "claimed_by": run.claimed_by,
         "last_error": run.last_error,
         "scheduled_at": run.scheduled_at.isoformat() if run.scheduled_at else None,
@@ -53,32 +72,81 @@ def get_agent_overview(
     now = utcnow()
     day_ago = now - datetime.timedelta(hours=24)
     active_statuses = ["queued", "claimed", "running", "waiting_approval", "waiting_input"]
+    operator_session_filter = AgentSession.source.in_(OPERATOR_SESSION_SOURCES)
 
     counts = {
-        "sessions": db.query(func.count(AgentSession.id)).filter(AgentSession.is_deleted == False).scalar() or 0,  # noqa: E712
-        "active_runs": db.query(func.count(AgentRun.id)).filter(AgentRun.status.in_(active_statuses)).scalar() or 0,
-        "queued_runs": db.query(func.count(AgentRun.id)).filter(AgentRun.status == "queued").scalar() or 0,
-        "waiting_approval_runs": db.query(func.count(AgentRun.id)).filter(AgentRun.status == "waiting_approval").scalar() or 0,
+        "sessions": (
+            db.query(func.count(AgentSession.id))
+            .filter(AgentSession.is_deleted == False, operator_session_filter)  # noqa: E712
+            .scalar()
+            or 0
+        ),
+        "active_runs": (
+            db.query(func.count(AgentRun.id))
+            .join(AgentSession, AgentSession.id == AgentRun.session_id)
+            .filter(AgentSession.is_deleted == False, AgentRun.status.in_(active_statuses), operator_session_filter)  # noqa: E712
+            .scalar()
+            or 0
+        ),
+        "queued_runs": (
+            db.query(func.count(AgentRun.id))
+            .join(AgentSession, AgentSession.id == AgentRun.session_id)
+            .filter(AgentSession.is_deleted == False, AgentRun.status == "queued", operator_session_filter)  # noqa: E712
+            .scalar()
+            or 0
+        ),
+        "waiting_approval_runs": (
+            db.query(func.count(AgentRun.id))
+            .join(AgentSession, AgentSession.id == AgentRun.session_id)
+            .filter(AgentSession.is_deleted == False, AgentRun.status == "waiting_approval", operator_session_filter)  # noqa: E712
+            .scalar()
+            or 0
+        ),
         "completed_last_24h": (
             db.query(func.count(AgentRun.id))
-            .filter(AgentRun.status == "completed", AgentRun.finished_at != None, AgentRun.finished_at >= day_ago)  # noqa: E711
+            .join(AgentSession, AgentSession.id == AgentRun.session_id)
+            .filter(
+                AgentRun.status == "completed",
+                AgentRun.finished_at != None,  # noqa: E711
+                AgentRun.finished_at >= day_ago,
+                AgentSession.is_deleted == False,  # noqa: E712
+                operator_session_filter,
+            )
             .scalar()
             or 0
         ),
         "failed_last_24h": (
             db.query(func.count(AgentRun.id))
-            .filter(AgentRun.status == "failed", AgentRun.finished_at != None, AgentRun.finished_at >= day_ago)  # noqa: E711
+            .join(AgentSession, AgentSession.id == AgentRun.session_id)
+            .filter(
+                AgentRun.status == "failed",
+                AgentRun.finished_at != None,  # noqa: E711
+                AgentRun.finished_at >= day_ago,
+                AgentSession.is_deleted == False,  # noqa: E712
+                operator_session_filter,
+            )
             .scalar()
             or 0
         ),
         "pending_approvals": db.query(func.count(AgentApprovalRequest.id)).filter(AgentApprovalRequest.status == "pending").scalar() or 0,
         "active_goals": (
             db.query(func.count(AgentGoal.id))
-            .filter(AgentGoal.status.in_(["planned", "running", "replanning", "blocked", "pending_verification", "verifying", "recovering"]))
+            .join(AgentSession, AgentSession.id == AgentGoal.session_id)
+            .filter(
+                AgentGoal.status.in_(["planned", "running", "replanning", "blocked", "pending_verification", "verifying", "recovering"]),
+                AgentSession.is_deleted == False,  # noqa: E712
+                operator_session_filter,
+            )
             .scalar()
             or 0
         ),
-        "blocked_goals": db.query(func.count(AgentGoal.id)).filter(AgentGoal.status == "blocked").scalar() or 0,
+        "blocked_goals": (
+            db.query(func.count(AgentGoal.id))
+            .join(AgentSession, AgentSession.id == AgentGoal.session_id)
+            .filter(AgentSession.is_deleted == False, AgentGoal.status == "blocked", operator_session_filter)  # noqa: E712
+            .scalar()
+            or 0
+        ),
         "enabled_scheduled_tasks": (
             db.query(func.count(AgentScheduledTask.id)).filter(AgentScheduledTask.enabled == True).scalar() or 0  # noqa: E712
         ),
@@ -88,7 +156,7 @@ def get_agent_overview(
         db.query(AgentRun, AgentSession, AgentMessage)
         .outerjoin(AgentSession, AgentSession.id == AgentRun.session_id)
         .outerjoin(AgentMessage, AgentMessage.id == AgentRun.trigger_message_id)
-        .filter(AgentRun.status.in_(active_statuses))
+        .filter(AgentSession.is_deleted == False, AgentRun.status.in_(active_statuses), operator_session_filter)  # noqa: E712
         .order_by(AgentRun.created_at.asc())
         .limit(active_limit)
         .all()
@@ -97,6 +165,7 @@ def get_agent_overview(
         db.query(AgentRun, AgentSession, AgentMessage)
         .outerjoin(AgentSession, AgentSession.id == AgentRun.session_id)
         .outerjoin(AgentMessage, AgentMessage.id == AgentRun.trigger_message_id)
+        .filter(AgentSession.is_deleted == False, operator_session_filter)  # noqa: E712
         .order_by(AgentRun.created_at.desc())
         .limit(recent_limit)
         .all()
@@ -104,19 +173,26 @@ def get_agent_overview(
     pending_approvals = (
         db.query(AgentApprovalRequest, AgentSession)
         .outerjoin(AgentSession, AgentSession.id == AgentApprovalRequest.session_id)
-        .filter(AgentApprovalRequest.status == "pending")
+        .filter(AgentApprovalRequest.status == "pending", AgentSession.is_deleted == False)  # noqa: E712
         .order_by(AgentApprovalRequest.created_at.asc())
         .limit(10)
         .all()
     )
     recent_sessions = (
         db.query(AgentSession)
-        .filter(AgentSession.is_deleted == False)  # noqa: E712
+        .filter(AgentSession.is_deleted == False, operator_session_filter)  # noqa: E712
         .order_by(AgentSession.updated_at.desc())
         .limit(session_limit)
         .all()
     )
-    recent_goals = db.query(AgentGoal).order_by(AgentGoal.updated_at.desc(), AgentGoal.created_at.desc()).limit(8).all()
+    recent_goals = (
+        db.query(AgentGoal)
+        .join(AgentSession, AgentSession.id == AgentGoal.session_id)
+        .filter(AgentSession.is_deleted == False, operator_session_filter)  # noqa: E712
+        .order_by(AgentGoal.updated_at.desc(), AgentGoal.created_at.desc())
+        .limit(8)
+        .all()
+    )
 
     return {
         "generated_at": now.isoformat(),
@@ -140,7 +216,7 @@ def get_agent_overview(
         "recent_sessions": [
             {
                 "id": session.id,
-                "title": session.title,
+                "title": _normalize_text(session.title),
                 "kind": session.kind,
                 "status": session.status,
                 "source": session.source,

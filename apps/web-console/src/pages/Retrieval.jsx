@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { api, apiUrl } from '../lib/api';
-
-const CLIP_LEAD_SECONDS = 2;
-const CLIP_LENGTH_SECONDS = 5;
-const MAX_RENDER_RESULTS = 300;
+import { api } from '../lib/api';
+import { formatDateTime } from '../lib/time';
 
 const modeOptions = [
     { id: 'structured', label: '条件检索' },
-    { id: 'nl', label: '自然语言检索' },
+    { id: 'nl', label: '语义描述' },
     { id: 'image', label: '以图搜人' },
 ];
 
@@ -18,17 +15,21 @@ const defaultFilters = {
     upper_color: 'All',
     orientation: 'All',
     camera_location: '',
-    start_time: '',
-    end_time: '',
     has_backpack: false,
-    has_bag: false,
     has_hat: false,
+    has_bag: false,
     has_glasses: false,
 };
 
-const genderMap = { Male: '男', Female: '女' };
-const ageGroupMap = { Child: '儿童', Teen: '青少年', Young: '青年', Adult: '成人', Old: '老年' };
-const colorMap = {
+const genderLabels = { Male: '男', Female: '女' };
+const ageGroupLabels = {
+    Child: '儿童',
+    Teen: '青少年',
+    Young: '青年',
+    Adult: '成人',
+    Old: '老年',
+};
+const colorLabels = {
     Black: '黑色',
     White: '白色',
     Gray: '灰色',
@@ -37,283 +38,120 @@ const colorMap = {
     Green: '绿色',
     Brown: '棕色',
     Yellow: '黄色',
-    Purple: '紫色',
-    Pink: '粉色',
-    Orange: '橙色',
 };
-const orientationMap = { Front: '正面', Side: '侧面', Back: '背面' };
+const orientationLabels = {
+    Front: '正面',
+    Side: '侧面',
+    Back: '背面',
+};
 
-function formatDateTime(value) {
-    if (!value) {
-        return '--';
-    }
-    try {
-        return new Date(value).toLocaleString('zh-CN');
-    } catch {
-        return value;
-    }
-}
-
-function formatTime(seconds) {
-    if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
-        return '--:--';
-    }
-    const floored = Math.max(0, Math.floor(seconds));
-    const minutes = Math.floor(floored / 60);
-    const remaining = floored % 60;
-    return `${minutes}:${String(remaining).padStart(2, '0')}`;
-}
-
-function buildVideoUrl(filename) {
-    return apiUrl(`/uploads/${encodeURIComponent(filename)}`);
-}
-
-function getResultKey(item, index = 0) {
-    return (
-        item?.snippet_info?.event_id ||
-        `${item?.file_id || 'f'}-${item?.record_id || 'r'}-${item?.snippet_info?.person_id || item?.snippet_info?.pedestrian_id || index}`
-    );
-}
-
-function renderAccessoryChips(attributes) {
-    const chips = [];
-    if (attributes?.has_backpack) {
-        chips.push('背包');
-    }
-    if (attributes?.has_bag) {
-        chips.push('手提包');
-    }
-    if (attributes?.has_hat) {
-        chips.push('帽子');
-    }
-    if (attributes?.has_glasses) {
-        chips.push('眼镜');
-    }
-    return chips;
-}
-
-function translateAttribute(value, mapping) {
+function translate(value, mapping) {
     return mapping[value] || value || '--';
+}
+
+function getAccessoryTags(attributes) {
+    const tags = [];
+    if (attributes?.has_backpack) tags.push('背包');
+    if (attributes?.has_bag) tags.push('手提包');
+    if (attributes?.has_hat) tags.push('帽子');
+    if (attributes?.has_glasses) tags.push('眼镜');
+    return tags;
+}
+
+function buildResultTitle(item) {
+    const attrs = item?.snippet_info?.attributes || {};
+    return [
+        translate(attrs.gender, genderLabels),
+        translate(attrs.age_group, ageGroupLabels),
+        translate(attrs.upper_color, colorLabels),
+    ]
+        .filter((part) => part && part !== '--')
+        .join(' · ') || '识别结果';
 }
 
 function Retrieval() {
     const location = useLocation();
     const navigate = useNavigate();
-    const clipRef = useRef(null);
-    const videoRef = useRef(null);
-
+    const imageInputRef = useRef(null);
     const [files, setFiles] = useState([]);
-    const [selectedFile, setSelectedFile] = useState(location.state?.fileId || '');
     const [mode, setMode] = useState('structured');
+    const [selectedFile, setSelectedFile] = useState(location.state?.fileId ? String(location.state.fileId) : '');
     const [filters, setFilters] = useState(defaultFilters);
-    const [nlQuery, setNlQuery] = useState('');
-    const [useLLM, setUseLLM] = useState(true);
-    const [imageQueryFile, setImageQueryFile] = useState(null);
-    const [imagePreviewUrl, setImagePreviewUrl] = useState('');
+    const [queryText, setQueryText] = useState('');
+    const [queryImage, setQueryImage] = useState(null);
     const [results, setResults] = useState([]);
+    const [searchNote, setSearchNote] = useState('');
     const [loading, setLoading] = useState(false);
-    const [searched, setSearched] = useState(false);
-    const [activeClip, setActiveClip] = useState(null);
-    const [nlMeta, setNlMeta] = useState(null);
-    const [imageMeta, setImageMeta] = useState(null);
     const [pageError, setPageError] = useState('');
-
-    const displayResults = useMemo(() => {
-        const bestByPerson = new Map();
-        const noPerson = [];
-
-        const getTimestamp = (item) => {
-            const ts = item?.snippet_info?.timestamp;
-            const num = Number(ts);
-            return Number.isFinite(num) ? num : Number.POSITIVE_INFINITY;
-        };
-
-        for (const item of results || []) {
-            const fileId = item?.file_id ?? 'unknown';
-            const personId = item?.snippet_info?.person_id || item?.snippet_info?.pedestrian_id;
-            if (!personId) {
-                noPerson.push(item);
-                continue;
-            }
-
-            const key = `${fileId}:${personId}`;
-            const prev = bestByPerson.get(key);
-            if (!prev || getTimestamp(item) < getTimestamp(prev)) {
-                bestByPerson.set(key, item);
-            }
-        }
-
-        return [...bestByPerson.values(), ...noPerson].slice(0, MAX_RENDER_RESULTS);
-    }, [results]);
-
-    const hiddenCount = Math.max(0, (results?.length || 0) - displayResults.length);
-    const selectedFileMeta = files.find((file) => String(file.id) === String(selectedFile));
-    const isSearchDisabled = loading || (mode === 'image' && !imageQueryFile) || (mode === 'nl' && !nlQuery.trim());
+    const [useLLM, setUseLLM] = useState(true);
 
     useEffect(() => {
         const loadFiles = async () => {
             try {
                 const response = await api.get('/files');
-                setFiles((response.data || []).filter((file) => file.status === 'analyzed'));
-                setPageError('');
+                setFiles(response.data || []);
             } catch (error) {
-                console.error('Failed to fetch analyzed files', error);
-                setPageError('已分析文件列表加载失败。');
+                console.error('Failed to load files for retrieval', error);
             }
         };
-
         void loadFiles();
     }, []);
 
-    useEffect(() => {
-        if (activeClip) {
-            clipRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-    }, [activeClip]);
+    const selectedFileLabel = useMemo(
+        () => files.find((item) => String(item.id) === String(selectedFile))?.filename || '',
+        [files, selectedFile],
+    );
 
-    useEffect(() => {
-        if (!imageQueryFile) {
-            setImagePreviewUrl('');
-            return;
-        }
-        const objectUrl = URL.createObjectURL(imageQueryFile);
-        setImagePreviewUrl(objectUrl);
-        return () => URL.revokeObjectURL(objectUrl);
-    }, [imageQueryFile]);
-
-    const handleImageQueryFileChange = (event) => {
-        const file = event.target.files?.[0] || null;
-        setImageQueryFile(file);
+    const handleStructuredSearch = async () => {
+        const payload = {
+            ...filters,
+            file_id: selectedFile ? Number(selectedFile) : null,
+        };
+        const response = await api.post('/search', payload);
+        setResults(response.data || []);
+        setSearchNote(`找到 ${(response.data || []).length} 条结果。`);
     };
 
-    const openClip = (item) => {
-        if (!item?.is_video || item?.snippet_info?.timestamp === undefined) {
-            return;
-        }
-        const timestamp = Number(item.snippet_info.timestamp) || 0;
-        const duration = item.duration ? Number(item.duration) : null;
-        const clipStart = Math.max(0, timestamp - CLIP_LEAD_SECONDS);
-        const proposedEnd = clipStart + CLIP_LENGTH_SECONDS;
-        const clipEnd = duration ? Math.min(duration, proposedEnd) : proposedEnd;
-
-        setActiveClip({
-            key: getResultKey(item),
-            filename: item.filename,
-            cameraLocation: item.camera_location,
-            realTime: item.real_time,
-            timestamp,
-            clipStart,
-            clipEnd,
-            duration,
-            videoUrl: buildVideoUrl(item.filename),
+    const handleNlSearch = async () => {
+        const response = await api.post('/search/nl', {
+            query: queryText,
+            file_id: selectedFile ? Number(selectedFile) : null,
+            use_llm: useLLM ? 1 : 0,
         });
+        setResults(response.data?.results || []);
+        setSearchNote(response.data?.explanation || '已完成语义检索。');
     };
 
-    const replayClip = () => {
-        if (!videoRef.current || !activeClip) {
-            return;
+    const handleImageSearch = async () => {
+        if (!queryImage) {
+            throw new Error('请先选择一张查询图片。');
         }
-        videoRef.current.currentTime = activeClip.clipStart;
-        videoRef.current.play().catch(() => {});
-    };
-
-    const handleClipReady = () => {
-        if (!videoRef.current || !activeClip) {
-            return;
+        const formData = new FormData();
+        formData.append('image', queryImage);
+        if (selectedFile) {
+            formData.append('file_id', String(Number(selectedFile)));
         }
-        const duration = videoRef.current.duration || activeClip.duration || 0;
-        const safeStart = Math.min(activeClip.clipStart, duration || activeClip.clipStart);
-        videoRef.current.currentTime = safeStart;
-        videoRef.current.play().catch(() => {});
-    };
-
-    const handleClipTimeUpdate = () => {
-        if (!videoRef.current || !activeClip) {
-            return;
-        }
-        if (videoRef.current.currentTime >= activeClip.clipEnd) {
-            videoRef.current.pause();
-        }
-    };
-
-    const resetSearch = () => {
-        setFilters(defaultFilters);
-        setNlQuery('');
-        setUseLLM(true);
-        setImageQueryFile(null);
-        setImageMeta(null);
-        setNlMeta(null);
-        setResults([]);
-        setSearched(false);
-        setActiveClip(null);
-        setPageError('');
+        const response = await api.post('/search/by-image', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        setResults(response.data?.results || []);
+        setSearchNote(`已根据图片完成检索，找到 ${(response.data?.results || []).length} 条结果。`);
     };
 
     const handleSearch = async () => {
-        if (mode === 'nl' && !nlQuery.trim()) {
-            setPageError('请先输入自然语言描述。');
-            return;
-        }
-
         setLoading(true);
-        setSearched(true);
-        setActiveClip(null);
         setPageError('');
         try {
-            setNlMeta(null);
-            setImageMeta(null);
-
-            if (mode === 'nl') {
-                const payload = {
-                    query: nlQuery,
-                    file_id: selectedFile ? Number(selectedFile) : null,
-                    use_llm: useLLM ? 1 : 0,
-                    cache: 1,
-                    dedup_person: 1,
-                    max_results: MAX_RENDER_RESULTS,
-                };
-                const response = await api.post('/search/nl', payload);
-                setNlMeta({
-                    llm_used: response.data.llm_used,
-                    cached: response.data.cached,
-                    criteria: response.data.criteria,
-                    explanation: response.data.explanation,
-                });
-                setResults(response.data.results || []);
-                return;
+            if (mode === 'structured') {
+                await handleStructuredSearch();
+            } else if (mode === 'nl') {
+                await handleNlSearch();
+            } else {
+                await handleImageSearch();
             }
-
-            if (mode === 'image') {
-                const formData = new FormData();
-                formData.append('image', imageQueryFile);
-                if (selectedFile) {
-                    formData.append('file_id', String(Number(selectedFile)));
-                }
-                formData.append('top_k', String(MAX_RENDER_RESULTS));
-                formData.append('min_score', '0.20');
-                const response = await api.post('/search/by-image', formData, {
-                    headers: { 'Content-Type': 'multipart/form-data' },
-                });
-                setImageMeta({ query_attributes: response.data?.query_attributes || {} });
-                setResults(response.data?.results || []);
-                return;
-            }
-
-            const payload = {
-                ...filters,
-                file_id: selectedFile ? Number(selectedFile) : null,
-                dedup_person: true,
-                max_results: MAX_RENDER_RESULTS,
-            };
-            if (!filters.has_backpack) delete payload.has_backpack;
-            if (!filters.has_bag) delete payload.has_bag;
-            if (!filters.has_hat) delete payload.has_hat;
-            if (!filters.has_glasses) delete payload.has_glasses;
-            const response = await api.post('/search', payload);
-            setResults(response.data || []);
         } catch (error) {
-            console.error('Search failed', error);
-            setPageError(error?.response?.data?.detail || '检索失败。');
+            console.error('Failed to search', error);
+            setPageError(error?.response?.data?.detail || error.message || '检索失败。');
         } finally {
             setLoading(false);
         }
@@ -321,353 +159,205 @@ function Retrieval() {
 
     return (
         <div className="page-shell">
-            <section className="page-header">
-                <div className="page-title-group">
-                    <span>检索</span>
-                    <h1>目标检索</h1>
-                    <p>支持条件检索、自然语言检索和以图搜人三种方式。</p>
-                </div>
-                <div className="page-header-actions">
-                    <button type="button" className="btn-primary" onClick={handleSearch} disabled={isSearchDisabled}>
-                        {loading ? '检索中...' : '开始检索'}
-                    </button>
-                    <button type="button" className="btn-secondary" onClick={resetSearch}>
-                        重置
-                    </button>
-                </div>
-            </section>
-
-            {pageError ? <div className="notice error">{pageError}</div> : null}
-
-            {!files.length ? (
-                <section className="card">
-                    <div className="empty-state">
-                        还没有可检索的已分析文件。请先到文件库上传并完成分析。
+            <section className="card subtle-card">
+                <div className="card-title-row">
+                    <div>
+                        <div className="list-row-title">事件与检索</div>
+                        <div className="list-row-subtitle">结构化检索、语义描述和以图搜人都会汇总在这里。</div>
                     </div>
-                    <div className="action-row">
-                        <button type="button" className="btn-primary" onClick={() => navigate('/files')}>
-                            打开文件库
-                        </button>
+                    <div className="segmented-control">
+                        {modeOptions.map((option) => (
+                            <button
+                                key={option.id}
+                                type="button"
+                                className={`segmented-item ${mode === option.id ? 'active' : ''}`}
+                                onClick={() => setMode(option.id)}
+                            >
+                                {option.label}
+                            </button>
+                        ))}
                     </div>
-                </section>
-            ) : null}
+                </div>
 
-            {files.length ? (
-                <>
-                    <section className="card">
-                        <div className="mode-tabs">
-                            {modeOptions.map((item) => (
-                                <button
-                                    key={item.id}
-                                    type="button"
-                                    className={`mode-tab ${mode === item.id ? 'active' : ''}`}
-                                    onClick={() => setMode(item.id)}
-                                >
-                                    {item.label}
-                                </button>
+                <div className="form-grid compact-form-grid" style={{ marginTop: 16 }}>
+                    <div className="form-field">
+                        <label>范围</label>
+                        <select value={selectedFile} onChange={(event) => setSelectedFile(event.target.value)}>
+                            <option value="">全部文件</option>
+                            {files.map((file) => (
+                                <option key={file.id} value={file.id}>
+                                    {file.filename}
+                                </option>
                             ))}
-                        </div>
+                        </select>
+                    </div>
 
-                        <div className="field-grid three">
-                            <label className="field">
-                                <span>文件范围</span>
-                                <select value={selectedFile} onChange={(event) => setSelectedFile(event.target.value)}>
-                                    <option value="">全部已分析文件</option>
-                                    {files.map((file) => (
-                                        <option key={file.id} value={file.id}>
-                                            {file.filename}
+                    {mode === 'structured' ? (
+                        <>
+                            <div className="form-field">
+                                <label>性别</label>
+                                <select value={filters.gender} onChange={(event) => setFilters((current) => ({ ...current, gender: event.target.value }))}>
+                                    <option value="All">全部</option>
+                                    <option value="Male">男</option>
+                                    <option value="Female">女</option>
+                                </select>
+                            </div>
+                            <div className="form-field">
+                                <label>年龄</label>
+                                <select
+                                    value={filters.age_group}
+                                    onChange={(event) => setFilters((current) => ({ ...current, age_group: event.target.value }))}
+                                >
+                                    <option value="All">全部</option>
+                                    <option value="Child">儿童</option>
+                                    <option value="Teen">青少年</option>
+                                    <option value="Young">青年</option>
+                                    <option value="Adult">成人</option>
+                                    <option value="Old">老年</option>
+                                </select>
+                            </div>
+                            <div className="form-field">
+                                <label>上衣颜色</label>
+                                <select
+                                    value={filters.upper_color}
+                                    onChange={(event) => setFilters((current) => ({ ...current, upper_color: event.target.value }))}
+                                >
+                                    <option value="All">全部</option>
+                                    {Object.keys(colorLabels).map((key) => (
+                                        <option key={key} value={key}>
+                                            {colorLabels[key]}
                                         </option>
                                     ))}
                                 </select>
-                            </label>
-
-                            <div className="field">
-                                <span>当前范围</span>
-                                <div className="field-readonly">
-                                    {selectedFileMeta
-                                        ? `${selectedFileMeta.filename}，上传于 ${formatDateTime(selectedFileMeta.upload_time)}`
-                                        : '当前将在全部已分析文件中检索'}
-                                </div>
                             </div>
-                        </div>
-
-                        {mode === 'structured' ? (
-                            <>
-                                <div className="field-grid three">
-                                    <label className="field">
-                                        <span>性别</span>
-                                        <select
-                                            value={filters.gender}
-                                            onChange={(event) => setFilters((current) => ({ ...current, gender: event.target.value }))}
-                                        >
-                                            <option value="All">不限</option>
-                                            <option value="Male">男</option>
-                                            <option value="Female">女</option>
-                                        </select>
-                                    </label>
-                                    <label className="field">
-                                        <span>年龄段</span>
-                                        <select
-                                            value={filters.age_group}
-                                            onChange={(event) => setFilters((current) => ({ ...current, age_group: event.target.value }))}
-                                        >
-                                            <option value="All">不限</option>
-                                            <option value="Child">儿童</option>
-                                            <option value="Teen">青少年</option>
-                                            <option value="Young">青年</option>
-                                            <option value="Adult">成人</option>
-                                            <option value="Old">老年</option>
-                                        </select>
-                                    </label>
-                                    <label className="field">
-                                        <span>上衣颜色</span>
-                                        <select
-                                            value={filters.upper_color}
-                                            onChange={(event) => setFilters((current) => ({ ...current, upper_color: event.target.value }))}
-                                        >
-                                            <option value="All">不限</option>
-                                            {Object.entries(colorMap).map(([key, label]) => (
-                                                <option key={key} value={key}>
-                                                    {label}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </label>
-                                    <label className="field">
-                                        <span>朝向</span>
-                                        <select
-                                            value={filters.orientation}
-                                            onChange={(event) => setFilters((current) => ({ ...current, orientation: event.target.value }))}
-                                        >
-                                            <option value="All">不限</option>
-                                            <option value="Front">正面</option>
-                                            <option value="Side">侧面</option>
-                                            <option value="Back">背面</option>
-                                        </select>
-                                    </label>
-                                    <label className="field">
-                                        <span>摄像头位置</span>
-                                        <input
-                                            type="text"
-                                            value={filters.camera_location}
-                                            onChange={(event) =>
-                                                setFilters((current) => ({ ...current, camera_location: event.target.value }))
-                                            }
-                                            placeholder="例如 摄像头 01"
-                                        />
-                                    </label>
-                                    <label className="field">
-                                        <span>开始时间</span>
-                                        <input
-                                            type="time"
-                                            value={filters.start_time}
-                                            onChange={(event) => setFilters((current) => ({ ...current, start_time: event.target.value }))}
-                                        />
-                                    </label>
-                                    <label className="field">
-                                        <span>结束时间</span>
-                                        <input
-                                            type="time"
-                                            value={filters.end_time}
-                                            onChange={(event) => setFilters((current) => ({ ...current, end_time: event.target.value }))}
-                                        />
-                                    </label>
-                                </div>
-
-                                <div className="action-row wrap">
-                                    {[
-                                        { key: 'has_backpack', label: '背包' },
-                                        { key: 'has_bag', label: '手提包' },
-                                        { key: 'has_hat', label: '帽子' },
-                                        { key: 'has_glasses', label: '眼镜' },
-                                    ].map((item) => (
-                                        <button
-                                            key={item.key}
-                                            type="button"
-                                            className={`filter-chip ${filters[item.key] ? 'active' : ''}`}
-                                            onClick={() =>
-                                                setFilters((current) => ({ ...current, [item.key]: !current[item.key] }))
-                                            }
-                                        >
-                                            {item.label}
-                                        </button>
+                            <div className="form-field">
+                                <label>朝向</label>
+                                <select
+                                    value={filters.orientation}
+                                    onChange={(event) => setFilters((current) => ({ ...current, orientation: event.target.value }))}
+                                >
+                                    <option value="All">全部</option>
+                                    {Object.keys(orientationLabels).map((key) => (
+                                        <option key={key} value={key}>
+                                            {orientationLabels[key]}
+                                        </option>
                                     ))}
-                                </div>
-                            </>
-                        ) : null}
-
-                        {mode === 'nl' ? (
-                            <div className="field-grid one">
-                                <label className="field">
-                                    <span>自然语言描述</span>
-                                    <textarea
-                                        value={nlQuery}
-                                        onChange={(event) => setNlQuery(event.target.value)}
-                                        placeholder="例如：查找下午两点左右在 Camera 01 附近出现、穿黑色上衣并背双肩包的成年男性。"
-                                    />
-                                </label>
-                                <label className="checkbox-field">
-                                    <input type="checkbox" checked={useLLM} onChange={(event) => setUseLLM(event.target.checked)} />
-                                    <span>优先使用模型解析描述</span>
-                                </label>
+                                </select>
                             </div>
-                        ) : null}
+                            <label className="checkbox-row">
+                                <input
+                                    type="checkbox"
+                                    checked={filters.has_backpack}
+                                    onChange={(event) => setFilters((current) => ({ ...current, has_backpack: event.target.checked }))}
+                                />
+                                <span>背包</span>
+                            </label>
+                            <label className="checkbox-row">
+                                <input
+                                    type="checkbox"
+                                    checked={filters.has_hat}
+                                    onChange={(event) => setFilters((current) => ({ ...current, has_hat: event.target.checked }))}
+                                />
+                                <span>帽子</span>
+                            </label>
+                            <label className="checkbox-row">
+                                <input
+                                    type="checkbox"
+                                    checked={filters.has_bag}
+                                    onChange={(event) => setFilters((current) => ({ ...current, has_bag: event.target.checked }))}
+                                />
+                                <span>手提包</span>
+                            </label>
+                            <label className="checkbox-row">
+                                <input
+                                    type="checkbox"
+                                    checked={filters.has_glasses}
+                                    onChange={(event) => setFilters((current) => ({ ...current, has_glasses: event.target.checked }))}
+                                />
+                                <span>眼镜</span>
+                            </label>
+                        </>
+                    ) : null}
 
-                        {mode === 'image' ? (
-                            <div className="field-grid two">
-                                <label className="field">
-                                    <span>参考图片</span>
-                                    <input type="file" accept="image/*" onChange={handleImageQueryFileChange} />
-                                </label>
-                                <div className="image-preview-card">
-                                    {imagePreviewUrl ? <img src={imagePreviewUrl} alt="参考图片" /> : <div className="empty-state compact">请上传参考图片</div>}
-                                    {imageQueryFile ? <p>{imageQueryFile.name}</p> : null}
-                                </div>
+                    {mode === 'nl' ? (
+                        <>
+                            <div className="form-field form-field-span-2">
+                                <label>语义描述</label>
+                                <textarea value={queryText} onChange={(event) => setQueryText(event.target.value)} placeholder="例如：检索穿深色上衣、背包、在入口处出现的人" />
                             </div>
-                        ) : null}
+                            <label className="checkbox-row">
+                                <input type="checkbox" checked={useLLM} onChange={(event) => setUseLLM(event.target.checked)} />
+                                <span>使用模型解析</span>
+                            </label>
+                        </>
+                    ) : null}
 
-                        {mode === 'nl' && nlMeta ? (
-                            <div className="notice info">
-                                {nlMeta.llm_used ? '模型解析' : '规则解析'}：{nlMeta.explanation || '系统已根据描述转换为检索条件。'}
-                            </div>
-                        ) : null}
-
-                        {mode === 'image' && imageMeta ? (
-                            <div className="notice info">
-                                已提取参考图像特征：{JSON.stringify(imageMeta.query_attributes || {})}
-                            </div>
-                        ) : null}
-                    </section>
-
-                    {activeClip ? (
-                        <section ref={clipRef} className="card">
-                            <div className="card-header">
-                                <div>
-                                    <h2 className="card-title">片段回看</h2>
-                                    <p className="card-subtitle">
-                                        {activeClip.filename} / {activeClip.cameraLocation || '未知摄像头'} / {activeClip.realTime || '--'}
-                                    </p>
-                                </div>
-                                <button type="button" className="btn-secondary" onClick={() => setActiveClip(null)}>
-                                    关闭
-                                </button>
-                            </div>
-
-                            <video
-                                key={`${activeClip.videoUrl}-${activeClip.clipStart}`}
-                                ref={videoRef}
-                                src={activeClip.videoUrl}
-                                controls
-                                preload="metadata"
-                                onLoadedMetadata={handleClipReady}
-                                onTimeUpdate={handleClipTimeUpdate}
-                                className="clip-player"
+                    {mode === 'image' ? (
+                        <>
+                            <input
+                                ref={imageInputRef}
+                                type="file"
+                                accept="image/*"
+                                style={{ display: 'none' }}
+                                onChange={(event) => setQueryImage(event.target.files?.[0] || null)}
                             />
-
-                            <div className="action-row">
-                                <span>
-                                    片段区间 {formatTime(activeClip.clipStart)} - {formatTime(activeClip.clipEnd)}，目标时间点 {formatTime(activeClip.timestamp)}
-                                </span>
-                                <button type="button" className="btn-primary" onClick={replayClip}>
-                                    重播
-                                </button>
-                            </div>
-                        </section>
-                    ) : null}
-
-                    {searched ? (
-                        <section className="card">
-                            <div className="card-header">
-                                <div>
-                                    <h2 className="card-title">检索结果</h2>
-                                    <p className="card-subtitle">
-                                        共显示 {displayResults.length} 条结果
-                                        {hiddenCount ? `，另有 ${hiddenCount} 条重复候选已折叠` : ''}
-                                    </p>
+                            <div className="form-field form-field-span-2">
+                                <label>查询图片</label>
+                                <div className="action-row">
+                                    <button type="button" className="btn-ghost" onClick={() => imageInputRef.current?.click()}>
+                                        选择图片
+                                    </button>
+                                    <span>{queryImage?.name || '未选择图片'}</span>
                                 </div>
                             </div>
-
-                            <div className="result-grid">
-                                {displayResults.length ? (
-                                    displayResults.map((item, index) => {
-                                        const attributes = item?.snippet_info?.attributes || {};
-                                        const accessoryChips = renderAccessoryChips(attributes);
-                                        const itemKey = getResultKey(item, index);
-                                        const canPlay = item.is_video && item.snippet_info?.timestamp !== undefined;
-                                        const matchScore = item?.snippet_info?.match_score;
-
-                                        return (
-                                            <article key={itemKey} className="result-card">
-                                                <div className="result-preview">
-                                                    {item?.snippet_info?.thumbnail ? (
-                                                        <img
-                                                            src={apiUrl(`/thumbnails/${item.snippet_info.thumbnail}`)}
-                                                            alt="检索结果缩略图"
-                                                            loading="lazy"
-                                                        />
-                                                    ) : (
-                                                        <div className="empty-state compact">暂无缩略图</div>
-                                                    )}
-                                                </div>
-
-                                                <div className="result-body">
-                                                    <h3>{item.camera_location || '未知摄像头'}</h3>
-                                                    <p>{item.filename}</p>
-                                                    <div className="result-meta">
-                                                        {item.real_time ? <span>{item.real_time}</span> : null}
-                                                        {item.snippet_info?.timestamp !== undefined ? (
-                                                            <span>视频时间 {formatTime(item.snippet_info.timestamp)}</span>
-                                                        ) : null}
-                                                    </div>
-
-                                                    <div className="chip-row">
-                                                        {attributes.gender ? <span className="status-tag is-info">{translateAttribute(attributes.gender, genderMap)}</span> : null}
-                                                        {attributes.age_group ? <span className="status-tag is-info">{translateAttribute(attributes.age_group, ageGroupMap)}</span> : null}
-                                                        {attributes.upper_color ? <span className="status-tag is-warning">{translateAttribute(attributes.upper_color, colorMap)}</span> : null}
-                                                        {attributes.orientation ? <span className="status-tag is-warning">{translateAttribute(attributes.orientation, orientationMap)}</span> : null}
-                                                        {item?.snippet_info?.person_id ? <span className="status-tag is-info">{item.snippet_info.person_id}</span> : null}
-                                                        {typeof matchScore === 'number' ? <span className="status-tag is-success">相似度 {Math.round(matchScore * 100)}%</span> : null}
-                                                    </div>
-
-                                                    {accessoryChips.length ? (
-                                                        <div className="chip-row">
-                                                            {accessoryChips.map((chip) => (
-                                                                <span key={chip} className="status-tag is-warning">
-                                                                    {chip}
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    ) : null}
-
-                                                    <div className="table-actions">
-                                                        <button
-                                                            type="button"
-                                                            className="btn-ghost"
-                                                            onClick={() => navigate('/traffic', { state: { fileId: item.file_id } })}
-                                                        >
-                                                            客流分析
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            className="btn-ghost"
-                                                            onClick={() => openClip(item)}
-                                                            disabled={!canPlay}
-                                                        >
-                                                            {canPlay ? '查看片段' : '静态图片'}
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </article>
-                                        );
-                                    })
-                                ) : (
-                                    <div className="empty-state">没有找到匹配结果。可以尝试放宽条件或切换检索模式。</div>
-                                )}
-                            </div>
-                        </section>
+                        </>
                     ) : null}
-                </>
-            ) : null}
+                </div>
+
+                <div className="action-row" style={{ marginTop: 16 }}>
+                    <button type="button" className="btn-primary" onClick={handleSearch} disabled={loading}>
+                        {loading ? '检索中…' : '开始检索'}
+                    </button>
+                    {selectedFileLabel ? <span className="list-row-subtitle">当前范围：{selectedFileLabel}</span> : null}
+                </div>
+                {pageError ? <div className="notice error">{pageError}</div> : null}
+                {searchNote ? <div className="notice success">{searchNote}</div> : null}
+            </section>
+
+            <section className="card">
+                <div className="list-row-title">检索结果</div>
+                <div className="list compact-list" style={{ marginTop: 12 }}>
+                    {results.map((item, index) => {
+                        const attrs = item?.snippet_info?.attributes || {};
+                        const accessoryTags = getAccessoryTags(attrs);
+                        return (
+                            <div key={`${item.record_id}-${index}`} className="list-row">
+                                <div className="list-row-main">
+                                    <div className="list-row-title">{buildResultTitle(item)}</div>
+                                    <div className="list-row-subtitle">
+                                        {item.filename} · {item.camera_location || '未标注点位'} · {item.real_time || formatDateTime(item.upload_time)}
+                                    </div>
+                                    <div className="list-row-subtitle">
+                                        朝向 {translate(attrs.orientation, orientationLabels)}
+                                        {accessoryTags.length ? ` · ${accessoryTags.join(' / ')}` : ''}
+                                        {item?.snippet_info?.match_score ? ` · 匹配 ${Number(item.snippet_info.match_score).toFixed(2)}` : ''}
+                                    </div>
+                                </div>
+                                <div className="list-row-meta">
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={() => navigate(`/tasks/${item.file_id || item.record_id}`)}
+                                    >
+                                        打开
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                    {!results.length ? <div className="empty-state">暂无结果。</div> : null}
+                </div>
+            </section>
         </div>
     );
 }

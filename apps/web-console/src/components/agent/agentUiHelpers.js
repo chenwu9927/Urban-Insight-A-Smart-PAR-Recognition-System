@@ -1,20 +1,14 @@
+import { formatDateTime, toTimestamp } from '../../lib/time';
+
+export { formatDateTime };
+
 export const POLL_INTERVAL_MS = 5000;
+export const ACTIVE_POLL_INTERVAL_MS = 1500;
 
-export const SUBSCRIPTION_SEVERITY_OPTIONS = [
-    { key: 'warning', label: '警告及以上' },
-    { key: 'critical', label: '仅严重告警' },
-    { key: 'info', label: '全部告警' },
-];
-
-export function formatDateTime(value) {
-    if (!value) {
-        return '--';
-    }
-    try {
-        return new Date(value).toLocaleString('zh-CN');
-    } catch {
-        return value;
-    }
+export function isPlaceholderTitle(value) {
+    const text = String(value || '').trim();
+    if (!text) return true;
+    return /^[?\s]+$/.test(text);
 }
 
 export function getMessageText(message) {
@@ -22,7 +16,9 @@ export function getMessageText(message) {
     const content = message.content;
     if (typeof content === 'string') return content;
     if (content && typeof content.text === 'string' && content.text.trim()) return content.text.trim();
-    if (content && typeof content.error_message === 'string' && content.error_message.trim()) return content.error_message.trim();
+    if (content && typeof content.error_message === 'string' && content.error_message.trim()) {
+        return content.error_message.trim();
+    }
     if (content && content.answer) return String(content.answer);
     if (content && content.output_payload) return JSON.stringify(content.output_payload, null, 2);
     if (content) return JSON.stringify(content, null, 2);
@@ -30,15 +26,43 @@ export function getMessageText(message) {
 }
 
 export function getSessionTitle(session) {
-    return session?.title?.trim() || `会话 ${session?.id?.slice(0, 8) || ''}`;
+    const title = String(session?.title || '').trim();
+    if (!isPlaceholderTitle(title)) {
+        return title;
+    }
+    if (session?.source === 'email') return '邮件对话';
+    if (session?.source === 'web') return '网页对话';
+    const suffix = session?.id?.slice(0, 8) || '';
+    return suffix ? `未命名会话 ${suffix}` : '未命名会话';
+}
+
+export function getSummaryText(summary) {
+    if (!summary) return '暂无摘要。';
+    if (typeof summary === 'string') return summary;
+    try {
+        return JSON.stringify(summary, null, 2);
+    } catch {
+        return String(summary);
+    }
 }
 
 export function sortSessions(items) {
     return [...items].sort((left, right) => {
-        const leftValue = new Date(left.last_run_at || left.updated_at || 0).getTime();
-        const rightValue = new Date(right.last_run_at || right.updated_at || 0).getTime();
+        const leftValue = toTimestamp(left.last_run_at || left.updated_at || 0);
+        const rightValue = toTimestamp(right.last_run_at || right.updated_at || 0);
         return rightValue - leftValue;
     });
+}
+
+export function translateSource(value) {
+    const mapping = {
+        web: '网页',
+        email: '邮件',
+        scheduled_task: '巡检',
+        manual: '手动',
+        memory: '记忆',
+    };
+    return mapping[value] || value || '--';
 }
 
 export function translateRunStatus(value) {
@@ -65,30 +89,36 @@ export function translateApprovalStatus(value) {
     return mapping[value] || value || '--';
 }
 
-export function translateSource(value) {
-    const mapping = {
-        web: '网页',
-        email: '邮件',
-        scheduled_task: '巡检',
-        manual: '手动',
-    };
-    return mapping[value] || value || '--';
-}
-
 export function translateLoopHealth(value) {
     const mapping = {
         healthy: '正常',
         degraded: '降级',
-        failed: '异常',
+        disabled: '已停用',
+        down: '已停止',
+        starting: '启动中',
+        stopping: '停止中',
     };
     return mapping[value] || value || '--';
 }
 
 export function translateLoopName(value) {
     const mapping = {
-        runtime: '运行循环',
+        runtime: '执行循环',
         scheduler: '调度循环',
         email: '邮件循环',
+    };
+    return mapping[value] || value || '--';
+}
+
+export function translateScheduleMode(value) {
+    const mapping = {
+        immediate: '即时',
+        scheduled: '定时',
+        event: '事件触发',
+        proactive: '主动任务',
+        replan: '重新规划',
+        goal_recovery: '目标恢复',
+        verification: '验证',
     };
     return mapping[value] || value || '--';
 }
@@ -110,39 +140,19 @@ export function translateSeverity(value) {
     return mapping[value] || value || '--';
 }
 
-export function translateScheduleMode(value) {
-    const mapping = {
-        immediate: '即时',
-        scheduled: '定时',
-        event: '事件触发',
-        proactive: '主动任务',
-        replan: '重新规划',
-        goal_recovery: '目标恢复',
-    };
-    return mapping[value] || value || '--';
+export function translateRole(value) {
+    if (value === 'user') return '你';
+    if (value === 'assistant') return '智能体';
+    if (value === 'system') return '系统';
+    return value || '--';
 }
 
-export function translateChannel(value) {
-    const mapping = {
-        email: '邮件',
-    };
-    return mapping[value] || value || '--';
+export function sourceToneClass(value) {
+    if (value === 'email') return 'is-email';
+    if (value === 'web') return 'is-web';
+    return 'is-neutral';
 }
 
-export function translateScheduleType(value) {
-    const mapping = {
-        realtime: '实时',
-        digest: '摘要',
-    };
-    return mapping[value] || value || '--';
-}
-
-export function getSummaryText(summary) {
-    if (!summary) return '暂无摘要。';
-    if (typeof summary === 'string') return summary;
-    try {
-        return JSON.stringify(summary, null, 2);
-    } catch {
-        return String(summary);
-    }
+export function isRunActive(run) {
+    return ['queued', 'claimed', 'running', 'waiting_approval', 'waiting_input'].includes(run?.status);
 }

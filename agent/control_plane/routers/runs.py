@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
 
 from agent.control_plane.schemas import (
@@ -85,10 +85,15 @@ def list_runs(
     goal_key: str | None = None,
     schedule_mode: str | None = None,
     claimed_by: str | None = None,
+    source: str | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    query = db.query(AgentRun)
+    query = (
+        db.query(AgentRun)
+        .join(AgentSession, AgentSession.id == AgentRun.session_id)
+        .filter(AgentSession.is_deleted == False)  # noqa: E712
+    )
     if status:
         query = query.filter(AgentRun.status == status)
     if session_id:
@@ -101,6 +106,8 @@ def list_runs(
         query = query.filter(AgentRun.schedule_mode == schedule_mode)
     if claimed_by:
         query = query.filter(AgentRun.claimed_by == claimed_by)
+    if source:
+        query = query.filter(AgentSession.source == source)
     return query.order_by(AgentRun.created_at.desc()).limit(limit).all()
 
 
@@ -126,6 +133,18 @@ def create_agent_run(payload: AgentRunCreate, db: Session = Depends(get_db)):
         trigger_message_id = message.id
 
     input_payload = payload.input_payload
+    if payload.action:
+        normalized_input_payload = dict(input_payload or {})
+        normalized_input_payload["action"] = payload.action
+        if payload.params:
+            params = dict(normalized_input_payload.get("params") or {})
+            params.update(payload.params)
+            if payload.action == "agent.chat" and not str(params.get("question") or "").strip():
+                legacy_message = params.get("message")
+                if isinstance(legacy_message, str) and legacy_message.strip():
+                    params["question"] = legacy_message.strip()
+            normalized_input_payload["params"] = params
+        input_payload = normalized_input_payload
     if payload.prompt:
         normalized_input_payload = dict(input_payload or {})
         if not str(normalized_input_payload.get("action") or "").strip():
@@ -167,16 +186,40 @@ def claim_run(payload: AgentRunClaimRequest, db: Session = Depends(get_db)):
     now = utcnow()
     lease_until = now + datetime.timedelta(seconds=max(5, payload.lease_seconds))
 
-    query = db.query(AgentRun).filter(
+    priority_rank = case(
+        (
+            (AgentSession.source == "web")
+            & (AgentRun.schedule_mode == "immediate")
+            & (AgentRun.parent_run_id == None),  # noqa: E711
+            0,
+        ),
+        (AgentRun.schedule_mode == "event", 1),
+        (AgentRun.schedule_mode == "immediate", 2),
+        (AgentRun.schedule_mode == "verification", 3),
+        (AgentRun.schedule_mode == "scheduled", 4),
+        (AgentRun.schedule_mode == "goal_recovery", 5),
+        (AgentRun.schedule_mode == "replan", 6),
+        (AgentRun.schedule_mode == "proactive", 7),
+        else_=8,
+    )
+
+    query = db.query(AgentRun).outerjoin(AgentSession, AgentSession.id == AgentRun.session_id).filter(
         or_(
             AgentRun.status == "queued",
             (AgentRun.status == "claimed") & (AgentRun.lease_expires_at != None) & (AgentRun.lease_expires_at < now),  # noqa: E711
+            (AgentRun.status == "running") & (AgentRun.lease_expires_at != None) & (AgentRun.lease_expires_at < now),  # noqa: E711
         )
     )
     if payload.schedule_modes:
         query = query.filter(AgentRun.schedule_mode.in_(payload.schedule_modes))
 
-    run = query.order_by(AgentRun.scheduled_at.asc(), AgentRun.created_at.asc()).first()
+    run = (
+        query.order_by(
+            priority_rank.asc(),
+            AgentRun.scheduled_at.asc(),
+            AgentRun.created_at.asc(),
+        ).first()
+    )
     if not run:
         return AgentRunClaimResponse(claimed=False, run=None, trigger_message=None, session=None)
 

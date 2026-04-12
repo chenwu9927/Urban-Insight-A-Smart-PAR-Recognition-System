@@ -22,7 +22,11 @@ def list_approvals(
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    query = db.query(AgentApprovalRequest)
+    query = (
+        db.query(AgentApprovalRequest)
+        .join(AgentSession, AgentSession.id == AgentApprovalRequest.session_id)
+        .filter(AgentSession.is_deleted == False)  # noqa: E712
+    )
     if status:
         query = query.filter(AgentApprovalRequest.status == status)
     if run_id:

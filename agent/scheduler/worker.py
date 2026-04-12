@@ -15,27 +15,47 @@ class AgentScheduler:
         self.client.close()
 
     def run_once(self) -> dict:
-        result = self.client.dispatch_due(limit=self.settings.dispatch_limit)
+        result = {"dispatched": 0, "skipped": 0, "run_ids": []}
         priority_dispatch_result = {"dispatched": 0, "skipped": 0, "run_ids": []}
         feedback_sweep_result = {"inspected": 0, "synced": 0, "replanned": 0, "verified": 0, "recovered": 0, "run_ids": []}
-        goal_result = self.client.sweep_goals(
-            limit=self.settings.goal_sweep_limit,
-            verification_cooldown_minutes=self.settings.goal_verification_cooldown_minutes,
-            goal_recovery_minutes=self.settings.goal_recovery_minutes,
-        )
-        memory_result = self.client.boost_patrols_from_memory(
-            lookback_days=self.settings.memory_boost_lookback_days,
-            boost_cooldown_minutes=self.settings.memory_boost_cooldown_minutes,
-        )
-        proactive_result = self.client.create_proactive_goals_from_memory(
-            lookback_days=self.settings.proactive_goal_lookback_days,
-            recurrence_threshold=self.settings.proactive_goal_recurrence_threshold,
-            use_llm_distillation=self.settings.proactive_goal_llm_distillation_enabled,
-            distilled_limit=self.settings.proactive_goal_llm_candidate_limit,
-            max_memory_chars=self.settings.proactive_goal_memory_max_chars,
-            min_distilled_confidence=self.settings.proactive_goal_min_distilled_confidence,
-            ttl_seconds=self.settings.proactive_goal_ttl_seconds,
-        )
+        goal_result = {"inspected": 0, "synced": 0, "replanned": 0, "verified": 0, "recovered": 0, "run_ids": []}
+        memory_result = {"scanned": 0, "triggered": 0, "run_ids": [], "task_ids": []}
+        proactive_result = {
+            "candidates": 0,
+            "created": 0,
+            "goal_ids": [],
+            "run_ids": [],
+            "rule_candidates": 0,
+            "llm_candidates": 0,
+            "feedback_status_counts": {},
+            "priority_boost": 0,
+            "feedback_priority_boost": 0,
+        }
+
+        if self.settings.enable_dispatch:
+            result = self.client.dispatch_due(limit=self.settings.dispatch_limit)
+        if self.settings.enable_goal_sweep:
+            goal_result = self.client.sweep_goals(
+                limit=self.settings.goal_sweep_limit,
+                verification_cooldown_minutes=self.settings.goal_verification_cooldown_minutes,
+                goal_recovery_minutes=self.settings.goal_recovery_minutes,
+            )
+        if self.settings.enable_memory_boost:
+            memory_result = self.client.boost_patrols_from_memory(
+                lookback_days=self.settings.memory_boost_lookback_days,
+                boost_cooldown_minutes=self.settings.memory_boost_cooldown_minutes,
+            )
+        if self.settings.enable_proactive_goals:
+            proactive_result = self.client.create_proactive_goals_from_memory(
+                lookback_days=self.settings.proactive_goal_lookback_days,
+                recurrence_threshold=self.settings.proactive_goal_recurrence_threshold,
+                use_llm_distillation=self.settings.proactive_goal_llm_distillation_enabled,
+                distilled_limit=self.settings.proactive_goal_llm_candidate_limit,
+                max_memory_chars=self.settings.proactive_goal_memory_max_chars,
+                min_distilled_confidence=self.settings.proactive_goal_min_distilled_confidence,
+                ttl_seconds=self.settings.proactive_goal_ttl_seconds,
+            )
+
         if result.get("dispatched") or result.get("skipped"):
             print(
                 "[agent-scheduler] dispatch",
@@ -93,7 +113,8 @@ class AgentScheduler:
                 },
             )
         if (
-            self.settings.proactive_goal_priority_dispatch_enabled
+            self.settings.enable_priority_dispatch
+            and self.settings.proactive_goal_priority_dispatch_enabled
             and proactive_result.get("created")
             and int(proactive_result.get("priority_boost") or 0) > 0
         ):
@@ -113,13 +134,14 @@ class AgentScheduler:
                         "dispatch_limit": dispatch_limit,
                         "dispatched": priority_dispatch_result.get("dispatched"),
                         "skipped": priority_dispatch_result.get("skipped"),
-                    "run_ids": priority_dispatch_result.get("run_ids"),
-                },
-            )
+                        "run_ids": priority_dispatch_result.get("run_ids"),
+                    },
+                )
         feedback_status_counts = proactive_result.get("feedback_status_counts") or {}
         needs_adjustment = int(feedback_status_counts.get("needs_adjustment") or 0)
         if (
-            self.settings.proactive_goal_feedback_sweep_enabled
+            self.settings.enable_feedback_sweep
+            and self.settings.proactive_goal_feedback_sweep_enabled
             and int(proactive_result.get("feedback_priority_boost") or 0) > 0
             and needs_adjustment > 0
         ):

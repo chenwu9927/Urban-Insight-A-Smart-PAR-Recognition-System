@@ -32,6 +32,7 @@ def call_chat_completions_json(
     system_prompt: str,
     user_payload: Dict[str, Any],
     temperature: float = 0.2,
+    timeout_s: int = 45,
 ) -> Dict[str, Any]:
     api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -56,7 +57,7 @@ def call_chat_completions_json(
             "Authorization": f"Bearer {api_key}",
         },
         payload=payload,
-        timeout_s=45,
+        timeout_s=timeout_s,
     )
     content = resp["choices"][0]["message"]["content"]
     return json.loads(content)
@@ -216,12 +217,17 @@ def answer_question(
     if not allow_llm or not api_key:
         # Simple grounded fallback: reuse deterministic insights summary.
         insights = generate_insights(stats, scope=scope, allow_llm=False)
+        summary = insights.get("summary", "")
+        if allow_llm:
+            answer = f"当前未配置 LLM Key，无法进行问答推理。你可以先参考摘要：{summary}"
+        else:
+            answer = summary or "当前没有足够的数据可供总结。"
         return {
             "llm_used": False,
             "scope": scope,
             "stats": stats,
             "question": question,
-            "answer": f"当前未配置 LLM Key，无法进行问答推理。你可以先参考摘要：{insights.get('summary','')}",
+            "answer": answer,
             "related_findings": insights.get("key_findings", []) or [],
             "suggested_next_questions": insights.get("questions", []) or [],
         }
@@ -277,12 +283,16 @@ def parse_nl_search_query(query: str, *, allow_llm: bool = True) -> Dict[str, An
         elif "male" in q or "男" in query:
             criteria["gender"] = "Male"
 
-        # age groups in this project typically: Child/Teenager/Adult/Senior (mock), or Child/Adult/Senior
-        if any(k in query for k in ["老人", "老年", "60", "senior"]):
-            criteria["age_group"] = "Senior"
+        # Age groups must stay aligned with the retrieval schema used across the app.
+        if any(k in query for k in ["老人", "老年", "年长", "old", "elder", "senior"]):
+            criteria["age_group"] = "Old"
         elif any(k in query for k in ["儿童", "小孩", "child"]):
             criteria["age_group"] = "Child"
-        elif any(k in query for k in ["青年", "成人", "adult"]):
+        elif any(k in query for k in ["青少年", "teen", "teenager"]):
+            criteria["age_group"] = "Teen"
+        elif any(k in query for k in ["青年", "young"]):
+            criteria["age_group"] = "Young"
+        elif any(k in query for k in ["成人", "adult"]):
             criteria["age_group"] = "Adult"
 
         colors = {
@@ -290,19 +300,21 @@ def parse_nl_search_query(query: str, *, allow_llm: bool = True) -> Dict[str, An
             "blue": "Blue",
             "black": "Black",
             "white": "White",
-            "grey": "Grey",
-            "gray": "Grey",
+            "grey": "Gray",
+            "gray": "Gray",
             "green": "Green",
             "yellow": "Yellow",
-            "khaki": "Khaki",
+            "brown": "Brown",
             "红": "Red",
             "蓝": "Blue",
             "黑": "Black",
             "白": "White",
-            "灰": "Grey",
+            "灰": "Gray",
             "绿": "Green",
             "黄": "Yellow",
-            "卡其": "Khaki",
+            "棕": "Brown",
+            "褐": "Brown",
+            "卡其": "Brown",
         }
         for k, v in colors.items():
             if k in q or k in query:
@@ -344,7 +356,7 @@ def parse_nl_search_query(query: str, *, allow_llm: bool = True) -> Dict[str, An
         "你是行人属性检索助手。"
         "请将用户的自然语言检索需求解析为严格JSON对象，必须包含键：criteria(对象)、explanation(字符串)。"
         "criteria 仅允许以下字段（没有就不要输出该字段）："
-        "gender(Male/Female), age_group(Child/Teenager/Adult/Senior), upper_color(Red/Blue/Black/White/Grey/Green/Yellow/Khaki), "
+        "gender(Male/Female), age_group(Child/Teen/Young/Adult/Old), upper_color(Red/Blue/Black/White/Gray/Green/Brown/Yellow), "
         "has_backpack(true/false), has_hat(true/false), has_glasses(true/false), has_bag(true/false), orientation(Front/Side/Back), "
         "start_time(HH:MM), end_time(HH:MM)."
         "不要输出多余文本，不要使用Markdown。"
@@ -445,15 +457,31 @@ def generate_record_report(record_summary: Dict[str, Any], *, allow_llm: bool = 
     """
     def fallback() -> Dict[str, Any]:
         meta = record_summary.get("meta") or {}
+        ped_count = int(meta.get("pedestrian_count") or 0)
+        semantic_count = int(meta.get("semantic_result_count") or 0)
+        window_count = int(meta.get("window_summary_count") or 0)
+        filename = meta.get("filename") or "未命名文件"
+        summary_parts = [f"文件 {filename}："]
+        if ped_count > 0:
+            summary_parts.append(f"识别 {ped_count} 人。")
+        elif window_count > 0:
+            summary_parts.append(f"生成 {window_count} 个语义时间窗。")
+        elif semantic_count > 0:
+            summary_parts.append(f"生成 {semantic_count} 条语义描述。")
+        else:
+            summary_parts.append("暂无可用识别结果。")
+        risk_level = str(meta.get("risk_level") or "").strip()
+        if risk_level:
+            summary_parts.append(f"风险等级 {risk_level}。")
         return {
             "llm_used": False,
             "record_id": meta.get("record_id"),
-            "summary": f"文件 {meta.get('filename')}：识别 {meta.get('pedestrian_count', 0)} 人。",
+            "summary": "".join(summary_parts),
             "key_findings": record_summary.get("highlights") or [],
             "anomalies": [],
             "recommendations": [
                 "如需更强的文字报告，请配置 LLM_API_KEY。",
-                "可进一步按时段/点位拆分对比。",
+                "可进一步按时段、点位或语义时间窗拆分对比。",
             ],
         }
 
@@ -472,6 +500,7 @@ def generate_record_report(record_summary: Dict[str, Any], *, allow_llm: bool = 
             system_prompt=system_prompt,
             user_payload={"record_summary": record_summary},
             temperature=0.2,
+            timeout_s=12,
         )
         parsed.setdefault("summary", "")
         parsed.setdefault("key_findings", [])

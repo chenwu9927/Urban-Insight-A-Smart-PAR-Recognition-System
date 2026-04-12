@@ -68,16 +68,20 @@ def compute_stats(
             ped_copy = dict(ped)
             ped_copy["_start_time"] = start_time
             ped_copy["_file_id"] = record.media_file_id
+            ped_copy["_real_time"] = None
 
             # 如果有日期过滤，检查行人时间是否在指定日期
             if filter_date and start_time:
                 timestamp = ped.get("timestamp", 0)
                 real_time = start_time + datetime.timedelta(seconds=timestamp)
+                ped_copy["_real_time"] = real_time
                 if real_time.date() != filter_date:
                     continue
             elif filter_date:
                 # 没有 start_time 但有日期过滤，跳过
                 continue
+            elif start_time:
+                ped_copy["_real_time"] = start_time + datetime.timedelta(seconds=ped.get("timestamp", 0))
 
             all_pedestrians.append(ped_copy)
 
@@ -116,7 +120,7 @@ def compute_stats(
     gender_counts = defaultdict(int)
     for ped in unique_peds:
         attrs = ped.get("attributes", {})
-        gender = attrs.get("gender", "Unknown")
+        gender = attrs.get("gender", "未知")
         gender_counts[gender] += 1
 
     gender_total = sum(gender_counts.values()) or 1
@@ -126,7 +130,7 @@ def compute_stats(
     age_counts = defaultdict(int)
     for ped in unique_peds:
         attrs = ped.get("attributes", {})
-        age_group = attrs.get("age_group", "Unknown")
+        age_group = attrs.get("age_group", "未知")
         age_counts[age_group] += 1
 
     age_total = sum(age_counts.values()) or 1

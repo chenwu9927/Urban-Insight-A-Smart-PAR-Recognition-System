@@ -19,6 +19,16 @@
               "type": "integer",
               "title": "File Id"
             }
+          },
+          {
+            "name": "pipeline",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "classic_cv",
+              "title": "Pipeline"
+            }
           }
         ],
         "responses": {
@@ -141,6 +151,80 @@
               "type": "integer",
               "default": 50,
               "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analysis/records/{record_id}": {
+      "get": {
+        "summary": "Get Analysis Record",
+        "operationId": "get_analysis_record_analysis_records__record_id__get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analysis/records/{record_id}/semantic": {
+      "get": {
+        "summary": "Get Analysis Semantic Record",
+        "operationId": "get_analysis_semantic_record_analysis_records__record_id__semantic_get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Record Id"
             }
           }
         ],

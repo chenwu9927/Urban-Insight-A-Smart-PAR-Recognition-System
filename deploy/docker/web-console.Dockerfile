@@ -10,8 +10,6 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 
-RUN apk add --no-cache wget
-
 COPY deploy/nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/web-console/dist /usr/share/nginx/html
 

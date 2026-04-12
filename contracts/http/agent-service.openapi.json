@@ -44,6 +44,22 @@
             }
           },
           {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
             "name": "site_id",
             "in": "query",
             "required": false,
@@ -73,6 +89,16 @@
                 }
               ],
               "title": "Camera Id"
+            }
+          },
+          {
+            "name": "operator_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Operator Only"
             }
           },
           {
@@ -1502,6 +1528,22 @@
                 }
               ],
               "title": "Claimed By"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
             }
           },
           {
@@ -4266,6 +4308,29 @@
           "session_id": {
             "type": "string",
             "title": "Session Id"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
           },
           "trigger_message_id": {
             "anyOf": [
