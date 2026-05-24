@@ -35,12 +35,18 @@ DEFAULT_ATTR_MODEL_NAME = "mobilenetv4_conv_small_050.e3000_r224_in1k"
 DEFAULT_ATTR_MODEL_PATH = os.path.join("model", "models", "mobilenet", "best_model.pth")
 DEFAULT_ATTR_IMAGE_SIZE = 224
 
-REID_SIM_THRESHOLD = 0.6
-REID_SIM_STRICT = 0.75
-IOU_THRESHOLD = 0.1
-TRACK_MAX_AGE_SECONDS = 5
-REID_MAX_AGE_SECONDS = 30
-EMBEDDING_MOMENTUM = 0.7
+REID_SIM_THRESHOLD = float(os.getenv("REID_SIM_THRESHOLD", "0.58"))
+REID_SIM_STRICT = float(os.getenv("REID_SIM_STRICT", "0.74"))
+IOU_THRESHOLD = float(os.getenv("TRACK_IOU_THRESHOLD", "0.1"))
+TRACK_MAX_AGE_SECONDS = float(os.getenv("TRACK_SPATIAL_MAX_AGE_SECONDS", os.getenv("TRACK_MAX_AGE_SECONDS", "3.5")))
+REID_MAX_AGE_SECONDS = float(os.getenv("REID_MAX_AGE_SECONDS", "60"))
+EMBEDDING_MOMENTUM = float(os.getenv("TRACK_EMBEDDING_MOMENTUM", "0.75"))
+CENTER_SCORE_THRESHOLD = float(os.getenv("TRACK_CENTER_SCORE_THRESHOLD", "0.35"))
+SIZE_SIM_THRESHOLD = float(os.getenv("TRACK_SIZE_SIM_THRESHOLD", "0.35"))
+SPATIAL_MATCH_THRESHOLD = float(os.getenv("TRACK_SPATIAL_MATCH_THRESHOLD", "0.72"))
+CENTER_DISTANCE_FACTOR = float(os.getenv("TRACK_CENTER_DISTANCE_FACTOR", "1.05"))
+VELOCITY_MOMENTUM = float(os.getenv("TRACK_VELOCITY_MOMENTUM", "0.65"))
+TRACK_USE_ATTR_EMBEDDING = os.getenv("TRACK_USE_ATTR_EMBEDDING", "0").lower() not in {"0", "false", "no"}
 
 
 def _load_checkpoint_compat(path: str, device: torch.device):
@@ -589,6 +595,35 @@ class RealPedestrianRecognizer(BaseRecognizer):
             return 0.0
         return inter_area / denom
 
+    @staticmethod
+    def _bbox_area(bbox) -> float:
+        x1, y1, x2, y2 = bbox
+        return float(max(0, x2 - x1) * max(0, y2 - y1))
+
+    @staticmethod
+    def _bbox_center(bbox) -> Tuple[float, float]:
+        x1, y1, x2, y2 = bbox
+        return (float(x1 + x2) / 2.0, float(y1 + y2) / 2.0)
+
+    @classmethod
+    def _bbox_size_similarity(cls, a, b) -> float:
+        area_a = cls._bbox_area(a)
+        area_b = cls._bbox_area(b)
+        if area_a <= 0 or area_b <= 0:
+            return 0.0
+        return float(min(area_a, area_b) / max(area_a, area_b))
+
+    @classmethod
+    def _bbox_center_score(cls, a, b, age_seconds: float) -> float:
+        ax, ay = cls._bbox_center(a)
+        bx, by = cls._bbox_center(b)
+        distance = float(np.hypot(ax - bx, ay - by))
+        width = max(abs(a[2] - a[0]), abs(b[2] - b[0]))
+        height = max(abs(a[3] - a[1]), abs(b[3] - b[1]))
+        base_distance = max(24.0, max(width, height) * CENTER_DISTANCE_FACTOR)
+        allowed_distance = base_distance * max(1.0, np.sqrt(max(age_seconds, 1.0)))
+        return max(0.0, 1.0 - distance / allowed_distance)
+
     def analyze(self, file_path: str) -> List[RecognitionResult]:
         # For single image
         frame = cv2.imread(file_path)
@@ -722,7 +757,10 @@ class RealPedestrianRecognizer(BaseRecognizer):
             return {
                 "embedding": embedding,
                 "bbox": bbox,
+                "velocity": (0.0, 0.0, 0.0, 0.0),
+                "first_frame": frame_index,
                 "last_frame": frame_index,
+                "hits": 1,
                 "attrs": None,
                 "upper_color": None,
                 "lower_color": None,
@@ -730,35 +768,62 @@ class RealPedestrianRecognizer(BaseRecognizer):
                 "last_color_frame": -10**9,
             }
 
-        def assign_track(embedding, bbox, frame_index, used_tracks):
-            nonlocal next_track_id
+        def predict_track_bbox(track, frame_index):
+            age = max(0, frame_index - track["last_frame"])
+            vx1, vy1, vx2, vy2 = track.get("velocity") or (0.0, 0.0, 0.0, 0.0)
+            return (
+                int(round(track["bbox"][0] + vx1 * age)),
+                int(round(track["bbox"][1] + vy1 * age)),
+                int(round(track["bbox"][2] + vx2 * age)),
+                int(round(track["bbox"][3] + vy2 * age)),
+            )
+
+        def update_track_motion(track, bbox, frame_index):
+            frame_delta = max(1, frame_index - track["last_frame"])
+            old_bbox = track["bbox"]
+            observed_velocity = tuple((bbox[i] - old_bbox[i]) / frame_delta for i in range(4))
+            old_velocity = track.get("velocity") or (0.0, 0.0, 0.0, 0.0)
+            track["velocity"] = tuple(
+                VELOCITY_MOMENTUM * old_velocity[i] + (1 - VELOCITY_MOMENTUM) * observed_velocity[i]
+                for i in range(4)
+            )
+            track["bbox"] = bbox
+            track["last_frame"] = frame_index
+            track["hits"] = int(track.get("hits", 0)) + 1
+
+        def update_track_embedding(track, embedding):
             if embedding is None:
-                best_id = None
-                best_iou = 0.0
-                for track_id, track in tracks.items():
-                    if track_id in used_tracks:
-                        continue
-                    age = frame_index - track["last_frame"]
-                    if age > max_age_frames:
-                        continue
-                    iou_score = self._bbox_iou(bbox, track["bbox"])
-                    if iou_score >= IOU_THRESHOLD and iou_score > best_iou:
-                        best_iou = iou_score
-                        best_id = track_id
+                return
+            if track["embedding"] is None:
+                track["embedding"] = embedding
+                return
+            merged = EMBEDDING_MOMENTUM * track["embedding"] + (1 - EMBEDDING_MOMENTUM) * embedding
+            norm = np.linalg.norm(merged) or 1.0
+            track["embedding"] = merged / norm
 
-                if best_id is not None:
-                    track = tracks[best_id]
-                    track["bbox"] = bbox
-                    track["last_frame"] = frame_index
-                    used_tracks.add(best_id)
-                    return best_id
+        def spatial_candidate_score(track, bbox, frame_index):
+            age_frames = frame_index - track["last_frame"]
+            age_seconds = age_frames / fps if fps else 0.0
+            predicted_bbox = predict_track_bbox(track, frame_index)
+            iou_score = self._bbox_iou(bbox, predicted_bbox)
+            center_score = self._bbox_center_score(bbox, predicted_bbox, age_seconds)
+            size_score = self._bbox_size_similarity(bbox, predicted_bbox)
+            if iou_score < IOU_THRESHOLD and (
+                center_score < CENTER_SCORE_THRESHOLD or size_score < SIZE_SIM_THRESHOLD
+            ):
+                return None
+            age_penalty = min(0.25, max(0.0, age_seconds) * 0.025)
+            score = (1.55 * iou_score) + (0.85 * center_score) + (0.35 * size_score) - age_penalty
+            return {
+                "score": score,
+                "iou": iou_score,
+                "center": center_score,
+                "size": size_score,
+                "age_seconds": age_seconds,
+            }
 
-                best_id = f"person_{next_track_id:04d}"
-                next_track_id += 1
-                tracks[best_id] = make_track(None, bbox, frame_index)
-                used_tracks.add(best_id)
-                return best_id
-
+        def assign_track(embedding, bbox, frame_index, used_tracks, *, allow_create=True):
+            nonlocal next_track_id
             best_id = None
             best_score = -1.0
             for track_id, track in tracks.items():
@@ -767,38 +832,38 @@ class RealPedestrianRecognizer(BaseRecognizer):
                 age = frame_index - track["last_frame"]
                 if age > reid_max_age_frames:
                     continue
-                if track["embedding"] is None:
-                    continue
 
-                sim = float(np.dot(embedding, track["embedding"]))
-                iou_score = self._bbox_iou(bbox, track["bbox"]) if age <= max_age_frames else 0.0
-                if age <= max_age_frames:
-                    if sim < REID_SIM_THRESHOLD and iou_score < IOU_THRESHOLD:
+                spatial = spatial_candidate_score(track, bbox, frame_index) if age <= max_age_frames else None
+                if embedding is None or track["embedding"] is None:
+                    if spatial is None or spatial["score"] < SPATIAL_MATCH_THRESHOLD:
                         continue
-                    score = sim + iou_score
+                    score = spatial["score"]
                 else:
+                    sim = float(np.dot(embedding, track["embedding"]))
                     if sim < REID_SIM_STRICT:
-                        continue
-                    score = sim
+                        if spatial is None:
+                            continue
+                        if sim < REID_SIM_THRESHOLD and spatial["score"] < SPATIAL_MATCH_THRESHOLD:
+                            continue
+                    if spatial is None:
+                        score = sim - min(0.2, (age / fps if fps else 0.0) * 0.01)
+                    else:
+                        score = sim + spatial["score"]
 
                 if score > best_score:
                     best_score = score
                     best_id = track_id
 
             if best_id is None:
+                if not allow_create:
+                    return None
                 best_id = f"person_{next_track_id:04d}"
                 next_track_id += 1
                 tracks[best_id] = make_track(embedding, bbox, frame_index)
             else:
                 track = tracks[best_id]
-                if track["embedding"] is None:
-                    track["embedding"] = embedding
-                else:
-                    merged = EMBEDDING_MOMENTUM * track["embedding"] + (1 - EMBEDDING_MOMENTUM) * embedding
-                    norm = np.linalg.norm(merged) or 1.0
-                    track["embedding"] = merged / norm
-                track["bbox"] = bbox
-                track["last_frame"] = frame_index
+                update_track_embedding(track, embedding)
+                update_track_motion(track, bbox, frame_index)
 
             used_tracks.add(best_id)
             return best_id
@@ -890,22 +955,36 @@ class RealPedestrianRecognizer(BaseRecognizer):
                         if crop.size == 0:
                             continue
 
+                        bbox_tuple = (int(x1), int(y1), int(x2), int(y2))
                         attrs_dict = None
+                        embedding = None
+
                         if self.reid_extractor and self.reid_extractor.model:
                             embedding = self.reid_extractor.extract(crop)
-                            if embedding is None:
+                            if embedding is None and TRACK_USE_ATTR_EMBEDDING:
                                 attrs_dict, embedding = self._predict_attrs(crop, return_embedding=True)
-                        else:
-                            embedding = None
 
-                        bbox_tuple = (int(x1), int(y1), int(x2), int(y2))
-                        person_id = assign_track(embedding, bbox_tuple, frame_idx, used_tracks)
+                        if embedding is None:
+                            person_id = assign_track(None, bbox_tuple, frame_idx, used_tracks, allow_create=False)
+                            if person_id is None:
+                                if TRACK_USE_ATTR_EMBEDDING:
+                                    attrs_dict, embedding = self._predict_attrs(crop, return_embedding=True)
+                                person_id = assign_track(embedding, bbox_tuple, frame_idx, used_tracks, allow_create=True)
+                        else:
+                            person_id = assign_track(embedding, bbox_tuple, frame_idx, used_tracks, allow_create=True)
+
                         track = tracks[person_id]
 
                         attr_due = (frame_idx - track["last_attr_frame"]) >= attr_refresh_frames or track["attrs"] is None
                         if attr_due:
                             if attrs_dict is None:
-                                attrs_dict = self._predict_attrs(crop)
+                                if TRACK_USE_ATTR_EMBEDDING:
+                                    attrs_dict, refreshed_embedding = self._predict_attrs(crop, return_embedding=True)
+                                    update_track_embedding(track, refreshed_embedding)
+                                else:
+                                    attrs_dict = self._predict_attrs(crop)
+                            elif embedding is not None:
+                                update_track_embedding(track, embedding)
                             track["attrs"] = attrs_dict
                             track["last_attr_frame"] = frame_idx
                         elif attrs_dict is None:
