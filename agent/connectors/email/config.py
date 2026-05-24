@@ -42,6 +42,12 @@ class EmailConnectorSettings:
         self.imap_username = os.getenv("AGENT_EMAIL_IMAP_USERNAME", "").strip()
         self.imap_password = os.getenv("AGENT_EMAIL_IMAP_PASSWORD", "").strip()
         self.imap_use_ssl = _env_bool("AGENT_EMAIL_IMAP_USE_SSL", True)
+        self.pop3_enable = _env_bool("AGENT_EMAIL_POP3_ENABLE", False)
+        self.pop3_host = os.getenv("AGENT_EMAIL_POP3_HOST", "").strip()
+        self.pop3_port = _env_int("AGENT_EMAIL_POP3_PORT", 995)
+        self.pop3_username = os.getenv("AGENT_EMAIL_POP3_USERNAME", "").strip()
+        self.pop3_password = os.getenv("AGENT_EMAIL_POP3_PASSWORD", "").strip()
+        self.pop3_use_ssl = _env_bool("AGENT_EMAIL_POP3_USE_SSL", True)
         raw_imap_mailboxes = os.getenv("AGENT_EMAIL_IMAP_MAILBOX", "INBOX,Junk Mail").strip()
         mailbox_candidates = [
             item.strip()

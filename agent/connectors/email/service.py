@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import imaplib
+import poplib
 import json
 import re
 import smtplib
@@ -375,6 +376,11 @@ class EmailConnectorService:
         return created, details
 
     def process_inbound_once(self) -> tuple[int, list[str]]:
+        if self.settings.pop3_enable:
+            if not self.settings.pop3_host or not self.settings.pop3_username:
+                return 0, ["POP3 inbound polling is enabled but not fully configured"]
+            return self._process_inbound_pop3_once()
+
         if not self.settings.imap_enable:
             return 0, []
         if not self.settings.imap_host or not self.settings.imap_username:
@@ -809,3 +815,328 @@ class EmailBackgroundPoller:
                     print(f"[agent-email] created deliveries: {created}; details={details}")
             except Exception as exc:
                 print(f"[agent-email] background poll failed: {exc}")
+
+
+def _email_connector_process_inbound_pop3_once(self: EmailConnectorService) -> tuple[int, list[str]]:
+    state = self._read_state()
+    processed_uidls = [
+        str(item).strip()
+        for item in (state.get("pop3_uidls") or [])
+        if str(item).strip()
+    ]
+    known_uidls = set(processed_uidls)
+    processed = 0
+    details: list[str] = []
+
+    client = None
+    try:
+        if self.settings.pop3_use_ssl:
+            client = poplib.POP3_SSL(self.settings.pop3_host, self.settings.pop3_port, timeout=30)
+        else:
+            client = poplib.POP3(self.settings.pop3_host, self.settings.pop3_port, timeout=30)
+        client.user(self.settings.pop3_username)
+        client.pass_(self.settings.pop3_password)
+
+        _, uidl_lines, _ = client.uidl()
+        uidl_map: dict[str, str] = {}
+        for raw_line in uidl_lines:
+            line = raw_line.decode("utf-8", errors="ignore").strip()
+            parts = line.split()
+            if len(parts) >= 2:
+                uidl_map[parts[0]] = parts[1]
+
+        _, list_lines, _ = client.list()
+        state_changed = False
+        for raw_line in list_lines:
+            line = raw_line.decode("utf-8", errors="ignore").strip()
+            parts = line.split()
+            if not parts:
+                continue
+
+            message_number = parts[0]
+            uidl = uidl_map.get(message_number) or f"pop3:{message_number}"
+            if uidl in known_uidls:
+                continue
+
+            try:
+                _, message_lines, _ = client.retr(message_number)
+            except Exception as exc:
+                details.append(f"failed to fetch POP3 message {message_number}: {exc}")
+                continue
+
+            raw_message = b"\n".join(message_lines)
+            message = BytesParser(policy=policy.default).parsebytes(raw_message)
+            from_address = parseaddr(message.get("Reply-To") or message.get("From") or "")[1].strip()
+            target_address = parseaddr(message.get("To") or "")[1].strip()
+            subject = _decode_subject(message.get("Subject"))
+            text = _extract_text_body(message)
+            connector_message_id = str(message.get("Message-ID") or uidl).strip()
+            thread_key = str(message.get("In-Reply-To") or message.get("References") or connector_message_id).strip()
+            dedup_key = f"inbound:{connector_message_id}"
+
+            if self._delivery_exists(dedup_key, delivery_status=None):
+                known_uidls.add(uidl)
+                processed_uidls.append(uidl)
+                state_changed = True
+                continue
+            if not from_address:
+                details.append(f"skipped POP3 message {message_number} without sender address")
+                known_uidls.add(uidl)
+                processed_uidls.append(uidl)
+                state_changed = True
+                continue
+            if self._is_self_address(from_address):
+                details.append(f"skipped POP3 message {message_number} from self address {from_address}")
+                known_uidls.add(uidl)
+                processed_uidls.append(uidl)
+                state_changed = True
+                continue
+
+            delivery_status = "received"
+            result: dict[str, Any] | Any
+            mode = "run"
+            try:
+                result, mode = self.ingest_email(
+                    {
+                        "from_address": from_address,
+                        "subject": subject,
+                        "text": text,
+                        "thread_key": thread_key,
+                        "connector_message_id": connector_message_id,
+                        "metadata": {
+                            "message_number": message_number,
+                            "uidl": uidl,
+                            "protocol": "pop3",
+                            "to_address": target_address,
+                        },
+                    }
+                )
+            except Exception as exc:
+                delivery_status = "failed"
+                result = {"error": str(exc)}
+                mode = "error"
+                details.append(f"failed to process POP3 message {message_number}: {exc}")
+
+            self.control_plane.create_delivery(
+                {
+                    "connector": "email",
+                    "direction": "inbound",
+                    "message_type": "email_inbound",
+                    "delivery_status": delivery_status,
+                    "dedup_key": dedup_key,
+                    "thread_key": thread_key,
+                    "source_address": from_address,
+                    "target_address": target_address,
+                    "subject": subject,
+                    "payload": {
+                        "mode": mode,
+                        "connector_message_id": connector_message_id,
+                        "message_number": message_number,
+                        "uidl": uidl,
+                        "protocol": "pop3",
+                        "result": result,
+                    },
+                    "sent_at": utcnow().isoformat(),
+                }
+            )
+            known_uidls.add(uidl)
+            processed_uidls.append(uidl)
+            state_changed = True
+            if delivery_status == "received":
+                processed += 1
+                details.append(f"processed POP3 email message_number={message_number} mode={mode}")
+
+        if state_changed:
+            state["pop3_uidls"] = processed_uidls[-1000:]
+            self._write_state(state)
+    finally:
+        if client is not None:
+            try:
+                client.quit()
+            except Exception:
+                pass
+
+    return processed, details
+
+
+EmailConnectorService._process_inbound_pop3_once = _email_connector_process_inbound_pop3_once
+
+
+def _email_connector_is_automated_message(message, from_address: str, subject: str) -> bool:
+    normalized_from = _normalize_email_address(from_address)
+    normalized_subject = str(subject or '').strip().lower()
+    auto_submitted = str(message.get('Auto-Submitted') or '').strip().lower()
+    precedence = str(message.get('Precedence') or '').strip().lower()
+    mailer_daemon_tokens = {
+        'mailer-daemon',
+        'postmaster@163.com',
+        'postmaster@service.netease.com',
+        'postmaster@163.net',
+    }
+    automated_subject_tokens = [
+        '系统退信',
+        'system bounce',
+        'delivery status notification',
+        'undeliverable',
+        'undelivered mail',
+        'mail delivery subsystem',
+        'failure notice',
+    ]
+    if normalized_from in mailer_daemon_tokens:
+        return True
+    if auto_submitted and auto_submitted != 'no':
+        return True
+    if precedence in {'bulk', 'auto_reply', 'list', 'junk'}:
+        return True
+    return any(token in normalized_subject for token in automated_subject_tokens)
+
+
+def _email_connector_process_inbound_pop3_once_filtered(self: EmailConnectorService) -> tuple[int, list[str]]:
+    state = self._read_state()
+    processed_uidls = [
+        str(item).strip()
+        for item in (state.get("pop3_uidls") or [])
+        if str(item).strip()
+    ]
+    known_uidls = set(processed_uidls)
+    processed = 0
+    details: list[str] = []
+
+    client = None
+    try:
+        if self.settings.pop3_use_ssl:
+            client = poplib.POP3_SSL(self.settings.pop3_host, self.settings.pop3_port, timeout=30)
+        else:
+            client = poplib.POP3(self.settings.pop3_host, self.settings.pop3_port, timeout=30)
+        client.user(self.settings.pop3_username)
+        client.pass_(self.settings.pop3_password)
+
+        _, uidl_lines, _ = client.uidl()
+        uidl_map: dict[str, str] = {}
+        for raw_line in uidl_lines:
+            line = raw_line.decode("utf-8", errors="ignore").strip()
+            parts = line.split()
+            if len(parts) >= 2:
+                uidl_map[parts[0]] = parts[1]
+
+        _, list_lines, _ = client.list()
+        state_changed = False
+        for raw_line in list_lines:
+            line = raw_line.decode("utf-8", errors="ignore").strip()
+            parts = line.split()
+            if not parts:
+                continue
+
+            message_number = parts[0]
+            uidl = uidl_map.get(message_number) or f"pop3:{message_number}"
+            if uidl in known_uidls:
+                continue
+
+            try:
+                _, message_lines, _ = client.retr(message_number)
+            except Exception as exc:
+                details.append(f"failed to fetch POP3 message {message_number}: {exc}")
+                continue
+
+            raw_message = b"\n".join(message_lines)
+            message = BytesParser(policy=policy.default).parsebytes(raw_message)
+            from_address = parseaddr(message.get("Reply-To") or message.get("From") or "")[1].strip()
+            target_address = parseaddr(message.get("To") or "")[1].strip()
+            subject = _decode_subject(message.get("Subject"))
+            text = _extract_text_body(message)
+            connector_message_id = str(message.get("Message-ID") or uidl).strip()
+            thread_key = str(message.get("In-Reply-To") or message.get("References") or connector_message_id).strip()
+            dedup_key = f"inbound:{connector_message_id}"
+
+            if self._delivery_exists(dedup_key, delivery_status=None):
+                known_uidls.add(uidl)
+                processed_uidls.append(uidl)
+                state_changed = True
+                continue
+            if not from_address:
+                details.append(f"skipped POP3 message {message_number} without sender address")
+                known_uidls.add(uidl)
+                processed_uidls.append(uidl)
+                state_changed = True
+                continue
+            if self._is_self_address(from_address):
+                details.append(f"skipped POP3 message {message_number} from self address {from_address}")
+                known_uidls.add(uidl)
+                processed_uidls.append(uidl)
+                state_changed = True
+                continue
+            if _email_connector_is_automated_message(message, from_address, subject):
+                details.append(f"skipped automated POP3 message {message_number} from {from_address} subject={subject}")
+                known_uidls.add(uidl)
+                processed_uidls.append(uidl)
+                state_changed = True
+                continue
+
+            delivery_status = "received"
+            result: dict[str, Any] | Any
+            mode = "run"
+            try:
+                result, mode = self.ingest_email(
+                    {
+                        "from_address": from_address,
+                        "subject": subject,
+                        "text": text,
+                        "thread_key": thread_key,
+                        "connector_message_id": connector_message_id,
+                        "metadata": {
+                            "message_number": message_number,
+                            "uidl": uidl,
+                            "protocol": "pop3",
+                            "to_address": target_address,
+                        },
+                    }
+                )
+            except Exception as exc:
+                delivery_status = "failed"
+                result = {"error": str(exc)}
+                mode = "error"
+                details.append(f"failed to process POP3 message {message_number}: {exc}")
+
+            self.control_plane.create_delivery(
+                {
+                    "connector": "email",
+                    "direction": "inbound",
+                    "message_type": "email_inbound",
+                    "delivery_status": delivery_status,
+                    "dedup_key": dedup_key,
+                    "thread_key": thread_key,
+                    "source_address": from_address,
+                    "target_address": target_address,
+                    "subject": subject,
+                    "payload": {
+                        "mode": mode,
+                        "connector_message_id": connector_message_id,
+                        "message_number": message_number,
+                        "uidl": uidl,
+                        "protocol": "pop3",
+                        "result": result,
+                    },
+                    "sent_at": utcnow().isoformat(),
+                }
+            )
+            known_uidls.add(uidl)
+            processed_uidls.append(uidl)
+            state_changed = True
+            if delivery_status == "received":
+                processed += 1
+                details.append(f"processed POP3 email message_number={message_number} mode={mode}")
+
+        if state_changed:
+            state["pop3_uidls"] = processed_uidls[-1000:]
+            self._write_state(state)
+    finally:
+        if client is not None:
+            try:
+                client.quit()
+            except Exception:
+                pass
+
+    return processed, details
+
+
+EmailConnectorService._process_inbound_pop3_once = _email_connector_process_inbound_pop3_once_filtered

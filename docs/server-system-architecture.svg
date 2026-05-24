@@ -1,0 +1,221 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1180" viewBox="0 0 1800 1180">
+  <defs>
+    <style>
+      .title { font: 700 28px Arial, sans-serif; fill: #132238; }
+      .subtitle { font: 600 16px Arial, sans-serif; fill: #26415f; }
+      .label { font: 600 14px Arial, sans-serif; fill: #17324d; }
+      .small { font: 12px Arial, sans-serif; fill: #294866; }
+      .tiny { font: 11px Arial, sans-serif; fill: #355777; }
+      .box { fill: #f8fbff; stroke: #7aa4cc; stroke-width: 2; rx: 16; ry: 16; }
+      .service { fill: #eef6ff; stroke: #5d8fbe; stroke-width: 2; rx: 14; ry: 14; }
+      .pipeline { fill: #fff7ea; stroke: #d69b3d; stroke-width: 2; rx: 12; ry: 12; }
+      .agent { fill: #edf9f2; stroke: #55a06b; stroke-width: 2; rx: 12; ry: 12; }
+      .db { fill: #f6efff; stroke: #8a6ec3; stroke-width: 2; rx: 16; ry: 16; }
+      .ext { fill: #fff1f1; stroke: #cc7171; stroke-width: 2; rx: 12; ry: 12; }
+      .note { fill: #f7f8fa; stroke: #b6bcc6; stroke-width: 1.5; rx: 12; ry: 12; }
+      .arrow { stroke: #4f6f90; stroke-width: 2.5; fill: none; marker-end: url(#m); }
+      .dashed { stroke-dasharray: 8 6; }
+    </style>
+    <marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4f6f90"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1800" height="1180" fill="#ffffff"/>
+  <text x="60" y="55" class="title">Urban Insight Runtime Architecture</text>
+  <text x="60" y="84" class="subtitle">Microservices + Pipe-and-Filter pipelines + Single always-on agent-service</text>
+
+  <rect x="50" y="110" width="1700" height="170" class="box"/>
+  <text x="70" y="140" class="subtitle">Ingress Layer</text>
+
+  <rect x="90" y="165" width="230" height="80" class="service"/>
+  <text x="120" y="197" class="label">Browser / Web Console</text>
+  <text x="120" y="220" class="small">Dashboard, Tasks, Search, Insights, Agent</text>
+
+  <rect x="400" y="150" width="430" height="105" class="service"/>
+  <text x="430" y="185" class="label">gateway (Nginx)</text>
+  <text x="430" y="208" class="small">Static SPA + API reverse proxy + auth gate</text>
+  <text x="430" y="230" class="tiny">/__auth_check -&gt; auth-service/auth/me</text>
+
+  <rect x="920" y="150" width="340" height="105" class="note"/>
+  <text x="945" y="183" class="label">API Route Split</text>
+  <text x="945" y="206" class="tiny">/api/auth,/api/users -&gt; auth-service</text>
+  <text x="945" y="224" class="tiny">/api/files,/api/uploads -&gt; media-service</text>
+  <text x="945" y="242" class="tiny">/api/analyze,/api/analysis,/api/history -&gt; analysis-service</text>
+
+  <rect x="1300" y="150" width="390" height="105" class="note"/>
+  <text x="1325" y="183" class="label">More Route Split</text>
+  <text x="1325" y="206" class="tiny">/api/search -&gt; search-service</text>
+  <text x="1325" y="224" class="tiny">/api/stats,/api/insights,/api/settings -&gt; insight-service</text>
+  <text x="1325" y="242" class="tiny">/api/agent,/api/email -&gt; agent-service</text>
+
+  <path d="M320 205 L400 205" class="arrow"/>
+
+  <rect x="50" y="310" width="1700" height="245" class="box"/>
+  <text x="70" y="340" class="subtitle">Microservice Layer</text>
+
+  <rect x="85" y="375" width="220" height="115" class="service"/>
+  <text x="110" y="410" class="label">auth-service</text>
+  <text x="110" y="433" class="small">Login / logout / me</text>
+  <text x="110" y="452" class="small">User management</text>
+  <text x="110" y="471" class="tiny">Cookie session_token + HMAC secret</text>
+
+  <rect x="335" y="375" width="220" height="115" class="service"/>
+  <text x="360" y="410" class="label">media-service</text>
+  <text x="360" y="433" class="small">Upload image/video</text>
+  <text x="360" y="452" class="small">List / delete media files</text>
+  <text x="360" y="471" class="tiny">Writes uploads + media_files rows</text>
+
+  <rect x="585" y="375" width="250" height="115" class="service"/>
+  <text x="610" y="410" class="label">analysis-service</text>
+  <text x="610" y="433" class="small">Task queue + background worker</text>
+  <text x="610" y="452" class="small">classic_cv / semantic_vlm / dual</text>
+  <text x="610" y="471" class="tiny">Writes analysis_tasks + analysis_records</text>
+
+  <rect x="865" y="375" width="220" height="115" class="service"/>
+  <text x="890" y="410" class="label">search-service</text>
+  <text x="890" y="433" class="small">Structured search / NL search</text>
+  <text x="890" y="452" class="small">ConvNeXtV2 + OSNet ReID</text>
+  <text x="890" y="471" class="tiny">Heavy retrieval model boundary</text>
+
+  <rect x="1115" y="375" width="220" height="115" class="service"/>
+  <text x="1140" y="410" class="label">insight-service</text>
+  <text x="1140" y="433" class="small">Stats / insights / brief</text>
+  <text x="1140" y="452" class="small">LLM config + test</text>
+  <text x="1140" y="471" class="tiny">Uses LongCat/OpenAI-compatible API</text>
+
+  <rect x="1365" y="365" width="335" height="145" class="agent"/>
+  <text x="1395" y="400" class="label">agent-service</text>
+  <text x="1395" y="423" class="small">Control plane + executor + scheduler</text>
+  <text x="1395" y="442" class="small">runtime loop + email loop + supervisor</text>
+  <text x="1395" y="461" class="small">Single always-on agent</text>
+  <text x="1395" y="480" class="tiny">Calls auth/media/analysis/search/insight by internal URLs</text>
+
+  <rect x="710" y="520" width="370" height="70" class="db"/>
+  <text x="745" y="552" class="label">postgres:16-alpine</text>
+  <text x="745" y="575" class="small">users, media_files, analysis_tasks, analysis_records, system_config, agent_* tables</text>
+
+  <path d="M515 255 L195 375" class="arrow"/>
+  <path d="M535 255 L445 375" class="arrow"/>
+  <path d="M610 255 L700 375" class="arrow"/>
+  <path d="M650 255 L970 375" class="arrow"/>
+  <path d="M700 255 L1225 375" class="arrow"/>
+  <path d="M760 255 L1530 365" class="arrow"/>
+
+  <path d="M195 490 L195 555 L800 555" class="arrow"/>
+  <path d="M445 490 L445 555 L800 555" class="arrow"/>
+  <path d="M710 490 L710 555" class="arrow"/>
+  <path d="M975 490 L975 555" class="arrow"/>
+  <path d="M1225 490 L1225 555 L990 555" class="arrow"/>
+  <path d="M1530 510 L1530 555 L990 555" class="arrow"/>
+
+  <rect x="50" y="605" width="820" height="500" class="box"/>
+  <text x="70" y="635" class="subtitle">analysis-service Internal Pipelines</text>
+
+  <rect x="80" y="665" width="360" height="410" class="pipeline"/>
+  <text x="105" y="695" class="label">Classic CV Pipeline</text>
+  <rect x="105" y="725" width="305" height="42" class="service"/>
+  <text x="125" y="751" class="small">1. Media read / frame sampling</text>
+  <rect x="105" y="780" width="305" height="42" class="service"/>
+  <text x="125" y="806" class="small">2. YOLO person detection</text>
+  <rect x="105" y="835" width="305" height="42" class="service"/>
+  <text x="125" y="861" class="small">3. Crop pedestrian regions</text>
+  <rect x="105" y="890" width="305" height="42" class="service"/>
+  <text x="125" y="916" class="small">4. Attribute predictor (MobileNetV4)</text>
+  <rect x="105" y="945" width="305" height="42" class="service"/>
+  <text x="125" y="971" class="small">5. Color extraction + grouped heads</text>
+  <rect x="105" y="1000" width="305" height="42" class="service"/>
+  <text x="125" y="1026" class="small">6. ReID / IoU tracking + thumbnails</text>
+  <path d="M258 767 L258 780" class="arrow"/>
+  <path d="M258 822 L258 835" class="arrow"/>
+  <path d="M258 877 L258 890" class="arrow"/>
+  <path d="M258 932 L258 945" class="arrow"/>
+  <path d="M258 987 L258 1000" class="arrow"/>
+  <text x="108" y="1062" class="tiny">Output: pedestrians, bbox, attrs, colors, duration, thumbnails</text>
+
+  <rect x="470" y="665" width="365" height="410" class="pipeline"/>
+  <text x="495" y="695" class="label">Semantic VLM Pipeline</text>
+  <rect x="495" y="725" width="310" height="42" class="service"/>
+  <text x="515" y="751" class="small">1. FrameSampler (sample fps / max frames)</text>
+  <rect x="495" y="780" width="310" height="42" class="service"/>
+  <text x="515" y="806" class="small">2. QwenFrameNarrator / multimodal API</text>
+  <rect x="495" y="835" width="310" height="42" class="service"/>
+  <text x="515" y="861" class="small">3. Frame descriptions with timestamps</text>
+  <rect x="495" y="890" width="310" height="42" class="service"/>
+  <text x="515" y="916" class="small">4. SemanticWindowAggregator (30s windows)</text>
+  <rect x="495" y="945" width="310" height="42" class="service"/>
+  <text x="515" y="971" class="small">5. VideoSemanticAnalyst (risk / event chain)</text>
+  <rect x="495" y="1000" width="310" height="42" class="service"/>
+  <text x="515" y="1026" class="small">6. Persist semantic_results / insights / meta</text>
+  <path d="M650 767 L650 780" class="arrow"/>
+  <path d="M650 822 L650 835" class="arrow"/>
+  <path d="M650 877 L650 890" class="arrow"/>
+  <path d="M650 932 L650 945" class="arrow"/>
+  <path d="M650 987 L650 1000" class="arrow"/>
+  <text x="498" y="1062" class="tiny">Fallback path: if no real VLM endpoint is configured, narrator returns safe placeholder descriptions</text>
+
+  <path d="M835 430 L930 430 L930 705 L835 705" class="arrow dashed"/>
+  <text x="878" y="686" class="tiny">dual</text>
+
+  <rect x="900" y="605" width="850" height="500" class="box"/>
+  <text x="920" y="635" class="subtitle">agent-service Internal Runtime</text>
+
+  <rect x="930" y="675" width="250" height="185" class="agent"/>
+  <text x="955" y="705" class="label">Control Plane API</text>
+  <text x="955" y="730" class="small">sessions / messages / runs</text>
+  <text x="955" y="749" class="small">goals / alerts / approvals</text>
+  <text x="955" y="768" class="small">subscriptions / deliveries</text>
+  <text x="955" y="787" class="small">overview / tools / runtime-status</text>
+  <text x="955" y="806" class="small">email inbound/outbox APIs</text>
+  <text x="955" y="838" class="tiny">Public route group: /api/agent/* and /api/email/*</text>
+
+  <rect x="1210" y="675" width="245" height="185" class="agent"/>
+  <text x="1235" y="705" class="label">Executor + Tool Loop</text>
+  <text x="1235" y="730" class="small">AgentContextBuilder</text>
+  <text x="1235" y="749" class="small">ApiOnlyExecutionService</text>
+  <text x="1235" y="768" class="small">OpenAI-compatible tool runner</text>
+  <text x="1235" y="787" class="small">Fallback chat executor</text>
+  <text x="1235" y="819" class="tiny">Reads semantic records first for behavior/risk questions</text>
+
+  <rect x="1485" y="675" width="230" height="185" class="agent"/>
+  <text x="1510" y="705" class="label">Runtime Loops</text>
+  <text x="1510" y="730" class="small">runtime loop</text>
+  <text x="1510" y="749" class="small">scheduler loop</text>
+  <text x="1510" y="768" class="small">email loop</text>
+  <text x="1510" y="787" class="small">supervisor loop</text>
+  <text x="1510" y="819" class="tiny">Always-on background processing</text>
+
+  <rect x="930" y="900" width="375" height="170" class="note"/>
+  <text x="955" y="930" class="label">Tool Registry</text>
+  <text x="955" y="955" class="small">agent.get_overview / agent.get_runtime_status</text>
+  <text x="955" y="974" class="small">stats.get / insights.get_brief / insights.ask</text>
+  <text x="955" y="993" class="small">search.structured / search.nl</text>
+  <text x="955" y="1012" class="small">analysis.get_task / get_record / get_semantic_record</text>
+  <text x="955" y="1031" class="small">patrol.* / memory.* / agent.chat</text>
+
+  <rect x="1340" y="900" width="375" height="170" class="note"/>
+  <text x="1365" y="930" class="label">Agent Memory + Workspace</text>
+  <text x="1365" y="955" class="small">Short-term: sessions / messages / runs</text>
+  <text x="1365" y="974" class="small">Long-term: MEMORY.md + daily notes</text>
+  <text x="1365" y="993" class="small">Volumes: agent-workspace-data</text>
+  <text x="1365" y="1012" class="small">Email state/outbox volumes</text>
+  <text x="1365" y="1031" class="small">Tables: agent_* in PostgreSQL</text>
+
+  <path d="M1180 765 L1210 765" class="arrow"/>
+  <path d="M1455 765 L1485 765" class="arrow"/>
+  <path d="M1330 830 L1330 900" class="arrow"/>
+  <path d="M1600 860 L1600 900" class="arrow"/>
+
+  <rect x="1045" y="560" width="520" height="70" class="ext"/>
+  <text x="1070" y="591" class="label">External Dependencies</text>
+  <text x="1070" y="614" class="small">LongCat / OpenAI-compatible LLM, 163 POP3/SMTP mailbox, optional semantic VLM endpoint</text>
+
+  <path d="M1332 675 L1305 630" class="arrow"/>
+  <path d="M1615 675 L1555 630" class="arrow"/>
+
+  <path d="M1455 775 C1455 775, 1265 575, 1225 490" class="arrow dashed"/>
+  <path d="M1455 785 C1455 785, 1010 575, 975 490" class="arrow dashed"/>
+  <path d="M1455 795 C1455 795, 760 575, 710 490" class="arrow dashed"/>
+
+  <text x="1210" y="1088" class="tiny">Legend: solid arrows = synchronous request or pipeline flow, dashed arrows = orchestration or optional dependency</text>
+</svg>

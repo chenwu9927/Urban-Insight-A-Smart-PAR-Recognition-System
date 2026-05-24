@@ -17,8 +17,6 @@ import {
     translateSource,
 } from './agentUiHelpers';
 
-const STREAM_STEP_MS = 18;
-const STREAM_CHARS_PER_TICK = 2;
 
 function AgentConsoleSimple({ user }) {
     const [overview, setOverview] = useState(null);
@@ -39,37 +37,7 @@ function AgentConsoleSimple({ user }) {
     const [draft, setDraft] = useState('');
     const [error, setError] = useState('');
     const [pendingRunId, setPendingRunId] = useState('');
-    const [streamState, setStreamState] = useState({ messageId: '', text: '', done: true });
     const messageListRef = useRef(null);
-    const streamTimerRef = useRef(null);
-    const animatedMessageIdsRef = useRef(new Set());
-
-    const clearStreamTimer = useCallback(() => {
-        if (streamTimerRef.current) {
-            window.clearInterval(streamTimerRef.current);
-            streamTimerRef.current = null;
-        }
-    }, []);
-
-    const startStreamingText = useCallback(
-        (messageId, fullText) => {
-            if (!messageId || !fullText) return;
-            clearStreamTimer();
-            let cursor = 0;
-            setStreamState({ messageId, text: '', done: false });
-            streamTimerRef.current = window.setInterval(() => {
-                cursor = Math.min(fullText.length, cursor + STREAM_CHARS_PER_TICK);
-                const nextText = fullText.slice(0, cursor);
-                const done = cursor >= fullText.length;
-                setStreamState({ messageId, text: nextText, done });
-                if (done) {
-                    clearStreamTimer();
-                    animatedMessageIdsRef.current.add(messageId);
-                }
-            }, STREAM_STEP_MS);
-        },
-        [clearStreamTimer],
-    );
 
     const primarySession = useMemo(
         () =>
@@ -184,33 +152,13 @@ function AgentConsoleSimple({ user }) {
         return () => window.clearInterval(timer);
     }, [activeSessionRun, loadConversation, pendingRunId, primarySessionId]);
 
-    useEffect(() => {
-        const latestAssistant = [...unifiedMessages].reverse().find((item) => item.role === 'assistant');
-        if (!latestAssistant) return;
-        const fullText = getMessageText(latestAssistant);
-        if (!fullText) return;
-        if (animatedMessageIdsRef.current.has(latestAssistant.id)) {
-            if (streamState.messageId !== latestAssistant.id || !streamState.done) {
-                setStreamState({ messageId: latestAssistant.id, text: fullText, done: true });
-            }
-            return;
-        }
-        startStreamingText(latestAssistant.id, fullText);
-    }, [unifiedMessages, startStreamingText, streamState.done, streamState.messageId]);
 
     useEffect(() => {
         messageListRef.current?.scrollTo({
             top: messageListRef.current.scrollHeight,
             behavior: 'smooth',
         });
-    }, [pendingRunId, streamState.text, unifiedMessages]);
-
-    useEffect(
-        () => () => {
-            clearStreamTimer();
-        },
-        [clearStreamTimer],
-    );
+    }, [pendingRunId, unifiedMessages]);
 
     const handleSend = async () => {
         const prompt = draft.trim();
@@ -343,9 +291,7 @@ function AgentConsoleSimple({ user }) {
                         {conversationLoading ? <div className="empty-state">正在加载…</div> : null}
                         {!conversationLoading &&
                             unifiedMessages.map((message) => {
-                                const fallbackText = getMessageText(message) || '暂无内容';
-                                const isStreamingMessage = streamState.messageId === message.id;
-                                const text = isStreamingMessage ? streamState.text || fallbackText : fallbackText;
+                                const text = getMessageText(message) || '暂无内容';
                                 return (
                                     <article
                                         key={message.id}
