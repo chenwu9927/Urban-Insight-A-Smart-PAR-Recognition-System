@@ -47,6 +47,9 @@ SPATIAL_MATCH_THRESHOLD = float(os.getenv("TRACK_SPATIAL_MATCH_THRESHOLD", "0.72
 CENTER_DISTANCE_FACTOR = float(os.getenv("TRACK_CENTER_DISTANCE_FACTOR", "1.05"))
 VELOCITY_MOMENTUM = float(os.getenv("TRACK_VELOCITY_MOMENTUM", "0.65"))
 TRACK_USE_ATTR_EMBEDDING = os.getenv("TRACK_USE_ATTR_EMBEDDING", "0").lower() not in {"0", "false", "no"}
+TRACKER_BACKEND = os.getenv("TRACKER_BACKEND", "spatial").strip().lower()
+TRACKER_CONFIG = os.getenv("TRACKER_CONFIG", "bytetrack.yaml").strip()
+TRACKER_CONFIDENCE = float(os.getenv("TRACKER_CONFIDENCE", "0.05"))
 
 
 def _load_checkpoint_compat(path: str, device: torch.device):
@@ -731,6 +734,10 @@ class RealPedestrianRecognizer(BaseRecognizer):
         thumbnail_height = max(64, int(os.getenv("THUMBNAIL_HEIGHT", "150")))
         thumbnail_quality = max(50, min(95, int(os.getenv("THUMBNAIL_JPEG_QUALITY", "85"))))
         thumbnail_queue_size = max(4, int(os.getenv("THUMBNAIL_QUEUE_SIZE", str(queue_size * 2))))
+        tracker_backend = os.getenv("TRACKER_BACKEND", TRACKER_BACKEND).strip().lower()
+        tracker_config = os.getenv("TRACKER_CONFIG", TRACKER_CONFIG).strip() or "bytetrack.yaml"
+        tracker_confidence = max(0.001, min(1.0, float(os.getenv("TRACKER_CONFIDENCE", str(TRACKER_CONFIDENCE)))))
+        use_bytetrack = tracker_backend in {"bytetrack", "byte_track", "yolo_bytetrack"}
 
         frame_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=queue_size)
         detect_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=queue_size)
@@ -741,6 +748,7 @@ class RealPedestrianRecognizer(BaseRecognizer):
         state_lock = threading.Lock()
         pipeline_error: Dict[str, Optional[Exception]] = {"exc": None}
         analyzed_sampled_frames = [0]
+        tracker_failed = [False]
 
         if progress_callback:
             try:
@@ -800,6 +808,15 @@ class RealPedestrianRecognizer(BaseRecognizer):
             merged = EMBEDDING_MOMENTUM * track["embedding"] + (1 - EMBEDDING_MOMENTUM) * embedding
             norm = np.linalg.norm(merged) or 1.0
             track["embedding"] = merged / norm
+
+        def get_or_update_external_track(track_key, bbox, frame_index, embedding=None):
+            track = tracks.get(track_key)
+            if track is None:
+                tracks[track_key] = make_track(embedding, bbox, frame_index)
+            else:
+                update_track_embedding(track, embedding)
+                update_track_motion(track, bbox, frame_index)
+            return track_key
 
         def spatial_candidate_score(track, bbox, frame_index):
             age_frames = frame_index - track["last_frame"]
@@ -914,12 +931,38 @@ class RealPedestrianRecognizer(BaseRecognizer):
 
                     frame = packet["frame"]
                     detections = []
-                    results = self.yolo_model(frame, classes=[0], verbose=False)
+                    if use_bytetrack and not tracker_failed[0]:
+                        try:
+                            results = self.yolo_model.track(
+                                frame,
+                                classes=[0],
+                                persist=True,
+                                tracker=tracker_config,
+                                conf=tracker_confidence,
+                                verbose=False,
+                            )
+                        except Exception as exc:
+                            tracker_failed[0] = True
+                            print(f"[warn] ByteTrack unavailable, fallback to spatial tracking: {exc}")
+                            results = self.yolo_model(frame, classes=[0], verbose=False)
+                    else:
+                        results = self.yolo_model(frame, classes=[0], verbose=False)
+
                     for result in results:
                         for box in result.boxes:
                             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
                             confidence = float(box.conf.item()) if hasattr(box.conf, "item") else float(box.conf)
-                            detections.append((x1, y1, x2, y2, confidence))
+                            tracker_id = None
+                            raw_id = getattr(box, "id", None)
+                            if raw_id is not None:
+                                try:
+                                    tracker_id = int(raw_id.item() if hasattr(raw_id, "item") else raw_id)
+                                except Exception:
+                                    try:
+                                        tracker_id = int(raw_id.cpu().numpy().reshape(-1)[0])
+                                    except Exception:
+                                        tracker_id = None
+                            detections.append((x1, y1, x2, y2, confidence, tracker_id))
 
                     packet["detections"] = detections
                     put_with_backpressure(detect_queue, packet)
@@ -946,7 +989,9 @@ class RealPedestrianRecognizer(BaseRecognizer):
                     h, w, _ = frame.shape
                     used_tracks = set()
 
-                    for x1, y1, x2, y2, conf in packet.get("detections", []):
+                    for detection in packet.get("detections", []):
+                        x1, y1, x2, y2, conf = detection[:5]
+                        tracker_id = detection[5] if len(detection) > 5 else None
                         x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
                         if x2 <= x1 or y2 <= y1:
                             continue
@@ -958,20 +1003,32 @@ class RealPedestrianRecognizer(BaseRecognizer):
                         bbox_tuple = (int(x1), int(y1), int(x2), int(y2))
                         attrs_dict = None
                         embedding = None
+                        track_source = "spatial"
 
-                        if self.reid_extractor and self.reid_extractor.model:
+                        if tracker_id is not None and use_bytetrack and not tracker_failed[0]:
+                            person_id = f"bt_person_{int(tracker_id):04d}"
+                            get_or_update_external_track(person_id, bbox_tuple, frame_idx)
+                            used_tracks.add(person_id)
+                            track_source = "bytetrack"
+                        elif self.reid_extractor and self.reid_extractor.model:
                             embedding = self.reid_extractor.extract(crop)
                             if embedding is None and TRACK_USE_ATTR_EMBEDDING:
                                 attrs_dict, embedding = self._predict_attrs(crop, return_embedding=True)
 
-                        if embedding is None:
+                            if embedding is None:
+                                person_id = assign_track(None, bbox_tuple, frame_idx, used_tracks, allow_create=False)
+                                if person_id is None:
+                                    if TRACK_USE_ATTR_EMBEDDING:
+                                        attrs_dict, embedding = self._predict_attrs(crop, return_embedding=True)
+                                    person_id = assign_track(embedding, bbox_tuple, frame_idx, used_tracks, allow_create=True)
+                            else:
+                                person_id = assign_track(embedding, bbox_tuple, frame_idx, used_tracks, allow_create=True)
+                        else:
                             person_id = assign_track(None, bbox_tuple, frame_idx, used_tracks, allow_create=False)
                             if person_id is None:
                                 if TRACK_USE_ATTR_EMBEDDING:
                                     attrs_dict, embedding = self._predict_attrs(crop, return_embedding=True)
                                 person_id = assign_track(embedding, bbox_tuple, frame_idx, used_tracks, allow_create=True)
-                        else:
-                            person_id = assign_track(embedding, bbox_tuple, frame_idx, used_tracks, allow_create=True)
 
                         track = tracks[person_id]
 
@@ -1020,6 +1077,7 @@ class RealPedestrianRecognizer(BaseRecognizer):
                                 "pedestrian_id": person_id,
                                 "person_id": person_id,
                                 "event_id": event_id,
+                                "track_source": track_source,
                                 "timestamp": float(round(timestamp, 1)),
                                 "thumbnail": thumbnail_filename,
                                 "bbox": {
@@ -1099,5 +1157,6 @@ class RealPedestrianRecognizer(BaseRecognizer):
             "is_video": True,
             "duration": int(duration),
             "camera_location": "Camera 01",
+            "tracker_backend": "bytetrack" if use_bytetrack and not tracker_failed[0] else "spatial",
             "pedestrians": video_results,
         }
